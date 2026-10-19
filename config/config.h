@@ -47,7 +47,12 @@ constexpr int kDisplayHeight = TFT_HEIGHT;
 constexpr uint32_t kDisplaySpiWriteHz = 40000000;
 // GC9A01 modules often need invert + BGR for correct black/green output
 constexpr bool kDisplayInvert = true;
+#if defined(BOARD_FNK0104B)
+// FNK0104B's ILI9341 is native RGB: no software R/B swap.
+constexpr bool kDisplayRgbOrder = false;
+#else
 constexpr bool kDisplayRgbOrder = true;
+#endif
 
 // --- Radar center defaults (overridden via WiFi setup portal) ---
 // constexpr double kDefaultRadarLat = 52.3676;

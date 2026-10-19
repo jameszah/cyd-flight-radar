@@ -26,13 +26,36 @@ Built and flashed from VS Code + PlatformIO on Windows. `fnk0104b` is the defaul
 - `src/ui/runway_overlay.cpp`: airport ident labels placed above-right of each airport's on-screen
   runway extent (`drawLabelUpRight`), clamped inside the 240px radar square; falls back to old placement
   if no runway is visible. `include/ui/radar_theme.h`: `kRunwayLabelGapPx` 3 -> 4.
+  Runways are 4px wide (was 2) in white `kColorRunwayLine` (trails keep `kColorRunway`), and
+  a background-colored pass `kRunwayClearMarginPx` (5px) wider blanks rings/crosshairs around them first.
 - `src/main.cpp`: re-enabled tap-to-cycle-range on the scale label (upstream commit c1436fc had
-  disabled it; `radarDisplayIsScaleTapped` was still present). Label sits at the radar's 3 o'clock edge.
+  disabled it; `radarDisplayIsScaleTapped` was still present). Label and tap zone are in the lower-right corner of the 240px radar square, outside the outer ring
+  (`scaleLabelAnchorX/Y`).
 - `README.md`: added an FNK0104B section.
 - `src/services/adsb_client.cpp` (branch `feat/route-lookup`): restored the adsbdb.com route lookup that
   upstream `aba1fc6` stubbed out. Tapping a plane queues its callsign; the next `fetchUpdate()` calls
   `fetchRoute()` first (same `s_client`, raw HTTP/1.0, stopped before the adsb.fi request), keeps one
   cached result (`s_route_result_*`), and copies it onto that aircraft. Info panel shows `| LAX -> JFK`.
+
+- Main-display aircraft tag now shows only the type (callsign + altitude removed; still in the info panel).
+  Icon color by altitude (`aircraftAltitudeColor` in `radar_display.cpp`, thresholds in `radar_theme.h`):
+  >= 10000 ft white (was 20000); below that green climbing / red descending / yellow level (|rate| < 200 fpm),
+  ground or unknown. Uses adsb.fi `baro_rate`/`geom_rate` (new `Aircraft::alt_ft`, `vrate_fpm`), falling
+  back to the altitude change since the previous fetch. Applies to military too; helicopters stay cyan.
+  A legend (`drawAltitudeLegend`: high / climb / flat / descend with icons) sits in the lower-left
+  corner outside the outer ring, drawn with the static grid. `drawCenterCoordinates` writes the radar
+  center (e.g. `51.05N` / `114.07W`, 12px) in the upper-left corner (`drawCornerInfo`). When exactly
+  one airport is in range, `runway::drawAirports` skips its on-circle label and returns it, and the
+  corner shows its ident (runway color) + its lat/lon instead; `drawTitle` puts "Flight Radar" /
+  "CYD" (10px, grid green) in the upper-right. Range label is now the same height as N/S/E/W
+  (`kScaleBelowCardinalPx` 3 -> 0).
+
+- `config/config.h`: `kDisplayRgbOrder` is false under `BOARD_FNK0104B` (it's a software R/B swap in
+  `hex2rgb565` etc. meant for GC9A01 boards; on the ILI9341 it turned red planes blue).
+
+- `src/ui/settings_menu.cpp`: timezone is now saved (`"tz"` = POSIX string, matched back to a preset in
+  `setup()`); it was never persisted, so it reset to UTC every boot. `airports`, `med_airports`, `auto_dim`
+  were saved but never loaded; `setup()` now reads them back too.
 
 ## Not yet verified on hardware
 - Range-label tap (just re-enabled) and the airport label placement.

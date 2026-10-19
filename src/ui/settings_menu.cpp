@@ -298,6 +298,8 @@ static void tz_btn_event_cb(lv_event_t * e) {
     if (s_tz_idx >= num_tz_presets) s_tz_idx = 0;
     
     s_tz_changed = true;
+    // Saved as the POSIX TZ string so it survives presets being reordered.
+    s_prefs.putString("tz", tz_presets[s_tz_idx].value);
     lv_label_set_text(tz_val_label, tz_presets[s_tz_idx].label);
 }
 
@@ -559,6 +561,17 @@ void setup() {
     s_max_aircraft = s_prefs.getInt("max_ac", services::adsb::kMaxAircraft);
     if (s_max_aircraft < 1) s_max_aircraft = 1;
     if (s_max_aircraft > services::adsb::kMaxAircraft) s_max_aircraft = services::adsb::kMaxAircraft;
+    // These were saved on change but never read back, so they reset on reboot.
+    s_show_airports = s_prefs.getBool("airports", s_show_airports);
+    s_show_medium_airports = s_prefs.getBool("med_airports", s_show_medium_airports);
+    s_auto_dimming = s_prefs.getBool("auto_dim", s_auto_dimming);
+    const String tz = s_prefs.getString("tz", "");
+    for (int i = 0; i < num_tz_presets; ++i) {
+        if (tz == tz_presets[i].value) {
+            s_tz_idx = i;
+            break;
+        }
+    }
 
     lv_init();
     

@@ -6,6 +6,7 @@
 
 #include <ArduinoJson.h>
 
+#include <cmath>
 #include <cstring>
 
 #include "config.h"
@@ -72,6 +73,8 @@ JsonDocument& filterDoc() {
     filter["lon"] = true;
     filter["alt_baro"] = true;
     filter["alt_geom"] = true;
+    filter["baro_rate"] = true;
+    filter["geom_rate"] = true;
     filter["gs"] = true;
     filter["tas"] = true;
     filter["ias"] = true;
@@ -376,7 +379,20 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
     target_ac->is_heli = utils::adsb::isHelicopter(plane);
     target_ac->is_military = utils::adsb::isMilitary(plane);
     fillTagFields(target_ac, plane);
-    
+
+    float alt_ft = NAN;
+    if (utils::adsb::isOnGround(plane)) {
+      alt_ft = 0.0f;
+    } else if (!utils::adsb::readJsonFloat(plane, "alt_baro", &alt_ft) &&
+               !utils::adsb::readJsonFloat(plane, "alt_geom", &alt_ft)) {
+      alt_ft = NAN;
+    }
+    target_ac->alt_ft = alt_ft;
+    float vrate = 0.0f;
+    const bool has_vrate = utils::adsb::readJsonFloat(plane, "baro_rate", &vrate) ||
+                           utils::adsb::readJsonFloat(plane, "geom_rate", &vrate);
+    target_ac->vrate_fpm = has_vrate ? vrate : 0.0f;
+
     target_ac->trail_size = 0;
     target_ac->trail_head = 0;
     target_ac->route_origin[0] = '\0';
@@ -389,6 +405,10 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
           memcpy(target_ac->trail, s_aircraft[i].trail, sizeof(target_ac->trail));
           strcpy(target_ac->route_origin, s_aircraft[i].route_origin);
           strcpy(target_ac->route_destination, s_aircraft[i].route_destination);
+          // No reported rate: fall back to the altitude change since the last fetch.
+          if (!has_vrate && !isnan(alt_ft) && !isnan(s_aircraft[i].alt_ft)) {
+            target_ac->vrate_fpm = alt_ft - s_aircraft[i].alt_ft;
+          }
           break;
         }
       }

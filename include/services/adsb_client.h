@@ -21,7 +21,12 @@ struct Aircraft {
   char desc[32];
   bool is_heli;
   bool is_military;
-  
+
+  /** Altitude in feet (0 on ground, NAN if unknown). */
+  float alt_ft;
+  /** Vertical rate in ft/min (+ climbing, - descending, 0 if unknown). */
+  float vrate_fpm;
+
   char route_origin[5];
   char route_destination[5];
   

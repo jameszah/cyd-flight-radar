@@ -21,8 +21,8 @@ constexpr int kScaleGapFromOuterRing = 6;
 
 /** Target cap height (px) for N/S/E/W. */
 constexpr int kCardinalLabelHeightPx = 14;
-/** Scale label is this many px shorter than cardinals. */
-constexpr int kScaleBelowCardinalPx = 3;
+/** Scale label is this many px shorter than cardinals (was 3; 0 = same size). */
+constexpr int kScaleBelowCardinalPx = 0;
 
 constexpr int kRingCount = 4;
 
@@ -46,8 +46,10 @@ constexpr float kAircraftTrackLengthScale = 1.5f / 5.0f;
 /** drawWideLine half-width for speed vectors (~2 px total). */
 constexpr float kAircraftTrackLineHalfWidth = 1.0f;
 
-constexpr float kRunwayLineWidthPx = 2.0f;
+constexpr float kRunwayLineWidthPx = 4.0f;  // was 2
 constexpr float kRunwayLineHalfWidth = kRunwayLineWidthPx * 0.5f;
+/** Grid rings/crosshairs are blanked this far (px) either side of a runway. */
+constexpr float kRunwayClearMarginPx = 5.0f;
 constexpr int kRunwayLabelHeightPx = kCardinalLabelHeightPx;
 constexpr int kRunwayLabelGapPx = 4;
 /** Gap from triangle edge to tag block (px). */
@@ -108,5 +110,16 @@ extern uint16_t kColorTagType;
 extern uint16_t kColorTagAltitude;
 extern uint16_t kColorRunway;
 extern uint16_t kColorRunwayLabel;
+/** Runway lines (white; trails still use kColorRunway). */
+extern uint16_t kColorRunwayLine;
+
+/** Aircraft icon colors by altitude / vertical trend. */
+constexpr float kHighAltitudeFt = 10000.0f;
+/** |vertical rate| below this (ft/min) counts as level flight. */
+constexpr float kLevelFlightFpm = 200.0f;
+extern uint16_t kColorAltHigh;     // >= kHighAltitudeFt
+extern uint16_t kColorAltClimb;    // below, climbing
+extern uint16_t kColorAltDescend;  // below, descending
+extern uint16_t kColorAltLevel;    // below, level / on ground / unknown
 
 }  // namespace ui::radar

@@ -47,6 +47,11 @@ uint16_t kColorTagType = hex2rgb565(0xFFC800);
 uint16_t kColorTagAltitude = hex2rgb565(0x5AC8FF);
 uint16_t kColorRunway = hex2rgb565(0x3896AA);
 uint16_t kColorRunwayLabel = hex2rgb565(0xFFFFFF);
+uint16_t kColorRunwayLine = hex2rgb565(0xFFFFFF);
+uint16_t kColorAltHigh = hex2rgb565(0xFFFFFF);
+uint16_t kColorAltClimb = hex2rgb565(0x00FF00);
+uint16_t kColorAltDescend = hex2rgb565(0xFF0000);
+uint16_t kColorAltLevel = hex2rgb565(0xFFFF00);
 
 }  // namespace radar
 
@@ -63,6 +68,11 @@ void updateThemeColors() {
     radar::kColorTagAltitude = radar::hex2rgb565(0x5AC8FF);
     radar::kColorRunway = radar::hex2rgb565(0x3896AA);
     radar::kColorRunwayLabel = radar::hex2rgb565(0xFFFFFF);
+    radar::kColorRunwayLine = radar::hex2rgb565(0xFFFFFF);
+    radar::kColorAltHigh = radar::hex2rgb565(0xFFFFFF);
+    radar::kColorAltClimb = radar::hex2rgb565(0x00FF00);
+    radar::kColorAltDescend = radar::hex2rgb565(0xFF0000);
+    radar::kColorAltLevel = radar::hex2rgb565(0xFFFF00);
 }
 
 namespace {
@@ -429,37 +439,23 @@ void applyTagStyle() {
   }
 }
 
+// Main-display tag shows only the aircraft type; callsign and altitude are in
+// the tap-to-select info panel, and altitude/trend is shown by icon color.
 int measureTagBlockWidth(const services::adsb::Aircraft& plane) {
   applyTagStyle();
-  int max_w = 0;
-  if (plane.callsign[0] != '\0') {
-    const int w = s_draw->textWidth(plane.callsign);
-    if (w > max_w) {
-      max_w = w;
-    }
-  }
-  if (plane.type[0] != '\0') {
-    const int w = s_draw->textWidth(plane.type);
-    if (w > max_w) {
-      max_w = w;
-    }
-  }
-  if (plane.alt[0] != '\0') {
-    const int w = s_draw->textWidth(plane.alt);
-    if (w > max_w) {
-      max_w = w;
-    }
-  }
-  return max_w;
+  return plane.type[0] != '\0' ? s_draw->textWidth(plane.type) : 0;
 }
 
 void drawAircraftTag(int x, int y, const services::adsb::Aircraft& plane) {
+  if (plane.type[0] == '\0') {
+    return;
+  }
   initTagLabelMetrics();
   applyTagStyle();
 
   const int line_h = s_draw->fontHeight();
   const int block_w = measureTagBlockWidth(plane);
-  const int block_h = line_h * 3;
+  const int block_h = line_h;
   int ly = y - block_h / 2;
 
   const int symbol_half =
@@ -478,22 +474,22 @@ void drawAircraftTag(int x, int y, const services::adsb::Aircraft& plane) {
   }
   ly = std::max(1, std::min(ly, radar::kSize - block_h - 1));
 
-  if (plane.callsign[0] != '\0') {
-    s_draw->setTextColor(radar::kColorLabel, radar::kColorBackground);
-    s_draw->drawString(plane.callsign, anchor_x, ly);
-  }
-  ly += line_h;
+  s_draw->setTextColor(radar::kColorTagType, radar::kColorBackground);
+  s_draw->drawString(plane.type, anchor_x, ly);
+}
 
-  if (plane.type[0] != '\0') {
-    s_draw->setTextColor(radar::kColorTagType, radar::kColorBackground);
-    s_draw->drawString(plane.type, anchor_x, ly);
+/** Icon color: high (>= kHighAltitudeFt), else climbing / descending / level. */
+uint16_t aircraftAltitudeColor(const services::adsb::Aircraft& plane) {
+  if (!isnan(plane.alt_ft) && plane.alt_ft >= radar::kHighAltitudeFt) {
+    return radar::kColorAltHigh;
   }
-  ly += line_h;
-
-  if (plane.alt[0] != '\0') {
-    s_draw->setTextColor(radar::kColorTagAltitude, radar::kColorBackground);
-    s_draw->drawString(plane.alt, anchor_x, ly);
+  if (plane.vrate_fpm >= radar::kLevelFlightFpm) {
+    return radar::kColorAltClimb;
   }
+  if (plane.vrate_fpm <= -radar::kLevelFlightFpm) {
+    return radar::kColorAltDescend;
+  }
+  return radar::kColorAltLevel;
 }
 
 struct AircraftDrawItem {
@@ -507,8 +503,7 @@ struct BeyondDotDrawItem {
   int x = 0;
   int y = 0;
   int dist_sq = 0;
-  bool is_heli = false;
-  bool is_military = false;
+  uint16_t color = 0;
 };
 
 void sortDrawItemsFarFirst(AircraftDrawItem* items, size_t count) {
@@ -573,16 +568,14 @@ void drawAircraft() {
     dots[dot_count].x = dot_x;
     dots[dot_count].y = dot_y;
     dots[dot_count].dist_sq = distSqFromCenter(dot_x, dot_y);
-    dots[dot_count].is_heli = planes[i].is_heli;
-    dots[dot_count].is_military = planes[i].is_military;
+    dots[dot_count].color = planes[i].is_heli ? radar::kColorHelicopter
+                                              : aircraftAltitudeColor(planes[i]);
     ++dot_count;
   }
 
   sortBeyondDotsFarFirst(dots, dot_count);
   for (size_t d = 0; d < dot_count; ++d) {
-    drawBeyondRingDot(dots[d].x, dots[d].y, 
-        dots[d].is_heli ? radar::kColorHelicopter : 
-        (dots[d].is_military ? radar::kColorMilitary : radar::kColorAircraft));
+    drawBeyondRingDot(dots[d].x, dots[d].y, dots[d].color);
   }
   
   s_visible_aircraft_count = draw_count + dot_count;
@@ -603,8 +596,7 @@ void drawAircraft() {
     if (planes[i].is_heli) {
       drawHelicopterSymbol(x, y, planes[i].nose_deg, radar::kColorHelicopter);
     } else {
-      drawHeadingTriangle(x, y, planes[i].nose_deg, 
-          planes[i].is_military ? radar::kColorMilitary : radar::kColorAircraft);
+      drawHeadingTriangle(x, y, planes[i].nose_deg, aircraftAltitudeColor(planes[i]));
     }
   }
   for (size_t d = 0; d < draw_count; ++d) {
@@ -638,7 +630,7 @@ void drawCardinalLabel(const char* text, int x, int y, textdatum_t datum) {
 
 void drawScaleLabelWithBackground(const char* text, int x, int y) {
   applyScaleStyle();
-  s_draw->setTextDatum(textdatum_t::middle_right);
+  s_draw->setTextDatum(textdatum_t::bottom_right);
 
   const int tw = s_draw->textWidth(text);
   const int th = s_draw->fontHeight();
@@ -646,7 +638,7 @@ void drawScaleLabelWithBackground(const char* text, int x, int y) {
   constexpr int kPadY = 2;
 
   const int left = x - tw - kPadX;
-  const int top = y - th / 2 - kPadY;
+  const int top = y - th - kPadY;
 
   s_draw->fillRect(left, top, tw + kPadX * 2, th + kPadY * 2,
                    radar::kColorBackground);
@@ -696,15 +688,106 @@ void drawCardinalLabels() {
   drawCardinalLabel("E", edge - margin, cy, textdatum_t::middle_right);
 }
 
-int scaleLabelAnchorX(int cx, int outer_radius) {
-  return cx + outer_radius - radar::kScaleGapFromOuterRing;
-}
+// Scale label sits in the lower-right corner of the radar square, outside the
+// outer ring; (x, y) is the label's bottom-right point.
+constexpr int kScaleCornerMarginPx = 12;
 
-void drawScaleLabel(int cx, int cy, int outer_radius) {
+int scaleLabelAnchorX() { return radar::kSize - 1 - kScaleCornerMarginPx; }
+
+int scaleLabelAnchorY() { return radar::kSize - 1 - kScaleCornerMarginPx; }
+
+void drawScaleLabel() {
   char scale_label[12];
   radar::formatCurrentRing3Label(scale_label, sizeof(scale_label));
-  drawScaleLabelWithBackground(scale_label,
-                               scaleLabelAnchorX(cx, outer_radius), cy);
+  drawScaleLabelWithBackground(scale_label, scaleLabelAnchorX(),
+                               scaleLabelAnchorY());
+}
+
+// Altitude color legend in the lower-left corner, outside the outer ring.
+// Rows go bottom-up; the shortest words sit highest, where the ring curves in.
+constexpr int kLegendTextHeightPx = 10;
+constexpr int kLegendRowPx = 11;
+constexpr int kLegendIconCx = 5;   // triangle spans x 2..13 pointing east
+constexpr int kLegendTextX = 16;
+constexpr int kLegendBottomRowCy = radar::kSize - 6;
+
+// Small corner text (legend, coordinates, title). *vlw_size caches the smooth
+// font size for height_px; the bitmap fallback is always Font0.
+void applyCornerTextStyle(int height_px, float* vlw_size, uint16_t color) {
+  if (displayFontIsSmooth()) {
+    if (*vlw_size == 0.0f) {
+      *vlw_size = findVlwSizeForHeight(height_px);
+    }
+    displayFontSetSmoothSize(*s_draw, *vlw_size);
+  } else {
+    s_draw->setFont(&fonts::Font0);  // GLCD font, so not displayFontSetBitmap
+    s_draw->setTextSize(1);
+  }
+  s_draw->setTextColor(color, radar::kColorBackground);
+}
+
+constexpr int kCoordTextHeightPx = 12;
+constexpr int kCoordRowPx = 13;
+constexpr int kTitleTextHeightPx = 10;
+
+// Upper-left corner, outside the ring: lat/lon (2 decimals) of the radar
+// center, or, when exactly one airport is in range, its ident and lat/lon
+// (its label is then left off the radar circle).
+void drawCornerInfo(const runway::SingleAirport* airport) {
+  const double lat = airport ? airport->lat : services::location::lat();
+  const double lon = airport ? airport->lon : services::location::lon();
+  char lat_buf[12];
+  char lon_buf[12];
+  snprintf(lat_buf, sizeof(lat_buf), "%.2f%c", fabs(lat), lat >= 0 ? 'N' : 'S');
+  snprintf(lon_buf, sizeof(lon_buf), "%.2f%c", fabs(lon), lon >= 0 ? 'E' : 'W');
+
+  static float s_vlw_size = 0.0f;
+  applyCornerTextStyle(kCoordTextHeightPx, &s_vlw_size, radar::kColorLabel);
+  s_draw->setTextDatum(textdatum_t::top_left);
+  int y = 2;
+  if (airport != nullptr) {
+    s_draw->setTextColor(radar::kColorRunway, radar::kColorBackground);
+    s_draw->drawString(airport->ident, 2, y);
+    s_draw->setTextColor(radar::kColorLabel, radar::kColorBackground);
+    y += kCoordRowPx;
+  }
+  s_draw->drawString(lat_buf, 2, y);
+  s_draw->drawString(lon_buf, 2, y + kCoordRowPx);
+}
+
+// "Flight Radar" / "CYD" in the upper-right corner, outside the ring.
+void drawTitle() {
+  static float s_vlw_size = 0.0f;
+  applyCornerTextStyle(kTitleTextHeightPx, &s_vlw_size, radar::kColorGrid);
+  s_draw->setTextDatum(textdatum_t::top_right);
+  const int right = radar::kSize - 3;
+  s_draw->drawString("Flight Radar", right, 2);
+  s_draw->drawString("CYD", right, 2 + kLegendRowPx);
+}
+
+void drawAltitudeLegend() {
+  struct Row {
+    const char* text;
+    uint16_t color;
+  };
+  // Top to bottom.
+  const Row rows[] = {
+      {"high", radar::kColorAltHigh},
+      {"climb", radar::kColorAltClimb},
+      {"flat", radar::kColorAltLevel},
+      {"descend", radar::kColorAltDescend},
+  };
+  constexpr int kRows = sizeof(rows) / sizeof(rows[0]);
+
+  static float s_vlw_size = 0.0f;
+  applyCornerTextStyle(kLegendTextHeightPx, &s_vlw_size, radar::kColorLabel);
+  s_draw->setTextDatum(textdatum_t::middle_left);
+
+  for (int i = 0; i < kRows; ++i) {
+    const int cy = kLegendBottomRowCy - (kRows - 1 - i) * kLegendRowPx;
+    drawHeadingTriangle(kLegendIconCx, cy, 90.0f, rows[i].color);
+    s_draw->drawString(rows[i].text, kLegendTextX, cy);
+  }
 }
 
 template <typename Gfx>
@@ -720,15 +803,16 @@ void drawStaticGrid(Gfx& gfx) {
   drawRings(cx, cy, grid_r);
   drawCrosshairs(cx, cy, grid_r, radar::kColorGrid);
   initPalette();
-  if (settings::isAirportsEnabled()) {
-    runway::drawLargeAirportRunways(gfx);
-  }
-  if (settings::isMediumAirportsEnabled()) {
-    runway::drawMediumAirportRunways(gfx);
-  }
+  runway::SingleAirport single_airport;
+  const bool has_single_airport = runway::drawAirports(
+      gfx, settings::isAirportsEnabled(), settings::isMediumAirportsEnabled(),
+      &single_airport);
   drawCenterDot(cx, cy);
   drawCardinalLabels();
-  drawScaleLabel(cx, cy, grid_r);
+  drawScaleLabel();
+  drawAltitudeLegend();
+  drawCornerInfo(has_single_airport ? &single_airport : nullptr);
+  drawTitle();
   gfx.setTextDatum(textdatum_t::top_left);
 }
 
@@ -1049,19 +1133,12 @@ bool radarDisplayHandleTouch(int x, int y) {
 bool radarDisplayIsScaleTapped(int x, int y) {
   if (y >= radar::kSize) return false;
   
-  const int cx = radar::kCenterX;
-  const int cy = radar::kCenterY;
-  const int grid_r = radar::kGridOuterRadius;
-  
-  int scale_x = scaleLabelAnchorX(cx, grid_r);
-  int scale_y = cy; 
-
-  int min_x = scale_x - 60;
-  int max_x = scale_x + 20;
-  int min_y = scale_y - 30;
-  int max_y = scale_y + 30;
-
-  return (x >= min_x && x <= max_x && y >= min_y && y <= max_y);
+  // Generous corner hit box around the bottom-right-anchored label, limited to
+  // outside the outer ring so taps on aircraft near the ring still select them.
+  const int min_x = scaleLabelAnchorX() - 60;
+  const int min_y = scaleLabelAnchorY() - 35;
+  if (x < min_x || y < min_y) return false;
+  return distSqFromCenter(x, y) > radar::kGridOuterRadius * radar::kGridOuterRadius;
 }
 
 void radarDisplayDraw() {
