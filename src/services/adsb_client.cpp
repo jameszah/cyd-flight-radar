@@ -35,8 +35,10 @@ WiFiClientSecure s_client;
 static char s_route_callsign[9] = {0};
 static char s_route_hex[7] = {0};
 
-
-
+// Last route looked up on adsbdb.com, applied to that aircraft on every fetch.
+static char s_route_result_hex[7] = {0};
+static char s_route_result_origin[5] = {0};
+static char s_route_result_dest[5] = {0};
 
 
 void fillTagFields(Aircraft* ac, const JsonObject& plane) {
@@ -86,8 +88,23 @@ JsonDocument& filterDoc() {
   return filter;
 }
 
+JsonDocument& routeFilterDoc() {
+  static JsonDocument filter;
+  static bool initialized = false;
+  if (!initialized) {
+    JsonObject route = filter["response"]["flightroute"].to<JsonObject>();
+    route["origin"]["iata_code"] = true;
+    route["origin"]["icao_code"] = true;
+    route["destination"]["iata_code"] = true;
+    route["destination"]["icao_code"] = true;
+    initialized = true;
+  }
+  return filter;
+}
+
 void init() {
   filterDoc();
+  routeFilterDoc();
   s_client.setInsecure();
 }
 
@@ -130,6 +147,85 @@ static bool extractNextJsonObject(Stream& stream, char* buffer, size_t max_len) 
     return true;
 }
 
+/** Reads the status line and headers; returns the HTTP status code, or -1. */
+static int readHttpHeaders(Stream& stream) {
+    char status[16];
+    size_t len = 0;
+    int c;
+    while ((c = safeStreamRead(stream)) != '\n') {
+        if (c == -1) return -1;
+        if (len < sizeof(status) - 1) status[len++] = (char)c;
+    }
+    status[len] = '\0';
+    const char* space = strchr(status, ' ');
+    if (space == nullptr) return -1;
+    const int code = atoi(space + 1);
+
+    const char endOfHeaders[] = "\r\n\r\n";
+    int match = 2;  // status line already ended with \r\n
+    while (match < 4) {
+        c = safeStreamRead(stream);
+        if (c == -1) return -1;
+        if (c == endOfHeaders[match]) {
+            match++;
+        } else {
+            match = (c == '\r') ? 1 : 0;
+        }
+    }
+    return code;
+}
+
+static void copyAirportCode(JsonObject airport, char* out, size_t out_len) {
+    out[0] = '\0';
+    const char* code = nullptr;
+    if (airport["iata_code"].is<const char*>()) code = airport["iata_code"].as<const char*>();
+    if ((code == nullptr || code[0] == '\0') && airport["icao_code"].is<const char*>()) {
+        code = airport["icao_code"].as<const char*>();
+    }
+    if (code == nullptr) return;
+    strncpy(out, code, out_len - 1);
+    out[out_len - 1] = '\0';
+}
+
+/**
+ * Look up a callsign's origin/destination on adsbdb.com. Uses the shared
+ * s_client and fully stops it before returning, so the adsb.fi fetch that
+ * follows starts from the same heap layout as it does without a lookup.
+ */
+static void fetchRoute(const char* callsign, const char* hex) {
+    // Remember the lookup even if it fails so a missing route isn't retried.
+    strcpy(s_route_result_hex, hex);
+    s_route_result_origin[0] = '\0';
+    s_route_result_dest[0] = '\0';
+
+    if (!s_client.connect("api.adsbdb.com", 443)) {
+        Serial.println("route: connect failed");
+        s_client.stop();
+        return;
+    }
+    s_client.printf("GET /v0/callsign/%s HTTP/1.0\r\n"
+                    "Host: api.adsbdb.com\r\n"
+                    "Connection: close\r\n"
+                    "User-Agent: CYD-Flight-Radar/1.0\r\n"
+                    "\r\n", callsign);
+
+    const int code = readHttpHeaders(s_client);
+    Serial.printf("route: %s HTTP %d\n", callsign, code);
+    if (code == 200) {
+        JsonDocument doc;
+        DeserializationError err = deserializeJson(doc, s_client, DeserializationOption::Filter(routeFilterDoc()));
+        if (err) {
+            Serial.printf("route: parse error: %s\n", err.c_str());
+        } else {
+            JsonObject route = doc["response"]["flightroute"];
+            copyAirportCode(route["origin"], s_route_result_origin, sizeof(s_route_result_origin));
+            copyAirportCode(route["destination"], s_route_result_dest, sizeof(s_route_result_dest));
+            Serial.printf("route: %s -> %s\n", s_route_result_origin, s_route_result_dest);
+        }
+    }  // doc freed before the SSL session, as in fetchUpdate()
+    s_client.stop();
+}
+
 bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
 #define HEAP() Serial.printf("heap[%s]: free=%u largest=%u\n", __func__, \
     ESP.getFreeHeap(), heap_caps_get_largest_free_block(MALLOC_CAP_8BIT))
@@ -139,8 +235,17 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
   s_client.setInsecure();
 
   if (s_route_callsign[0] != '\0') {
+    char callsign[sizeof(s_route_callsign)];
+    char hex[sizeof(s_route_hex)];
+    strcpy(callsign, s_route_callsign);
+    strcpy(hex, s_route_hex);
     s_route_callsign[0] = '\0';
     s_route_hex[0] = '\0';
+    // No flight number (callsign fell back to hex) or already looked up: skip.
+    if (strcmp(callsign, hex) != 0 && strcmp(hex, s_route_result_hex) != 0) {
+      fetchRoute(callsign, hex);
+      HEAP(); // [0b] after route lookup
+    }
   }
 
   const float dist_nm = utils::math::kmToNauticalMiles(fetch_radius_km);
@@ -287,8 +392,12 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
           break;
         }
       }
+      if (strcmp(target_ac->hex, s_route_result_hex) == 0) {
+        strcpy(target_ac->route_origin, s_route_result_origin);
+        strcpy(target_ac->route_destination, s_route_result_dest);
+      }
     }
-    
+
     size_t last_idx = (target_ac->trail_head + kTrailLength - 1) % kTrailLength;
     if (target_ac->trail_size == 0 || target_ac->trail[last_idx].lat != p_lat || target_ac->trail[last_idx].lon != p_lon) {
       target_ac->trail[target_ac->trail_head].lat = p_lat;
