@@ -95,3 +95,17 @@ SOFTWARE.
 ## :writing_hand: Author
 
 This project was started in 2026 by [Nicholas Wilde](https://github.com/nicholaswilde/).
+
+## Freenove FNK0104B (ESP32-S3, 2.8" ILI9341, capacitive touch)
+
+Build environment `fnk0104b` (now the default). In VS Code with PlatformIO, pick `env:fnk0104b` and press Upload, or run:
+
+```
+pio run -e fnk0104b -t upload
+pio device monitor -e fnk0104b
+```
+
+- Flashes over the USB-C port (native USB). If the port doesn't show up, hold BOOT, tap RST, release BOOT, then upload again.
+- Touch is the FT6336 on I2C (SDA 16, SCL 15, RST 18, INT 17). If taps land in the wrong place, change `cfg.offset_rotation` (0-3) in `include/hardware/lgfx_config.hpp`.
+- If colours look inverted (black background shows white), remove `-D TFT_INVERT=1` from the `fnk0104b` env.
+- First boot opens the `cyd-flight-radar-XXXX` Wi-Fi portal to set your network and radar location.
