@@ -4,6 +4,9 @@
 
 namespace services::adsb {
 
+/** Points kept per aircraft for the flight-path trail (was 6). */
+constexpr size_t kTrailLength = 18;
+
 struct Aircraft {
   char hex[7];
   float lat;
@@ -25,7 +28,7 @@ struct Aircraft {
   struct {
     float lat;
     float lon;
-  } trail[6];
+  } trail[kTrailLength];
   size_t trail_size;
   size_t trail_head;
 };

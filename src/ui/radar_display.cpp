@@ -401,7 +401,7 @@ void drawFlightTrail(int cx, int cy, const services::adsb::Aircraft& plane) {
   int last_x = cx;
   int last_y = cy;
   for (size_t i = 0; i < plane.trail_size; ++i) {
-    size_t idx = (plane.trail_head + 6 - 1 - i) % 6;
+    size_t idx = (plane.trail_head + services::adsb::kTrailLength - 1 - i) % services::adsb::kTrailLength;
     int px = 0;
     int py = 0;
     latLonToScreen(plane.trail[idx].lat, plane.trail[idx].lon, &px, &py);
@@ -766,9 +766,12 @@ void drawRadarSweep(lgfx::LovyanGFX& gfx) {
   const float current_angle_deg = (millis() % t_ms) * speed;
   const float current_angle_rad = current_angle_deg * M_PI / 180.0f;
   
-  // Draw fading trail
-  for (int i = 20; i >= 0; --i) {
-    const float trail_angle_deg = current_angle_deg - i * 1.5f;
+  // Draw fading trail. kSweepLines sets how many lines make up the beam
+  // (was 20, about 30 deg wide); kSweepStepDeg is the gap between them.
+  constexpr int kSweepLines = 7;
+  constexpr float kSweepStepDeg = 1.5f;
+  for (int i = kSweepLines - 1; i >= 0; --i) {
+    const float trail_angle_deg = current_angle_deg - i * kSweepStepDeg;
     const float trail_angle_rad = trail_angle_deg * M_PI / 180.0f;
     const int tx = cx + static_cast<int>(lroundf(sinf(trail_angle_rad) * r));
     const int ty = cy - static_cast<int>(lroundf(cosf(trail_angle_rad) * r));
@@ -783,7 +786,7 @@ void drawRadarSweep(lgfx::LovyanGFX& gfx) {
     uint8_t fg_g = (fg_hex >> 8) & 0xFF;
     uint8_t fg_b = fg_hex & 0xFF;
 
-    const float t = 1.0f - (static_cast<float>(i) / 20.0f);
+    const float t = 1.0f - (static_cast<float>(i) / kSweepLines);
     const uint8_t red = static_cast<uint8_t>(bg_r + (fg_r - bg_r) * t);
     const uint8_t green = static_cast<uint8_t>(bg_g + (fg_g - bg_g) * t);
     const uint8_t blue = static_cast<uint8_t>(bg_b + (fg_b - bg_b) * t);

@@ -180,7 +180,7 @@ void drawBoldRunwayLabel(lgfx::LGFXBase& gfx, const char* ident, int mx, int my)
 }
 
 template <typename RunwayT>
-bool drawRunwayLine(lgfx::LGFXBase& gfx, const RunwayT& rw) {
+bool drawRunwayLine(lgfx::LGFXBase& gfx, const RunwayT& rw, int* out = nullptr) {
   const float le_lat = e7ToDeg(rw.le_lat_e7);
   const float le_lon = e7ToDeg(rw.le_lon_e7);
   const float he_lat = e7ToDeg(rw.he_lat_e7);
@@ -202,6 +202,12 @@ bool drawRunwayLine(lgfx::LGFXBase& gfx, const RunwayT& rw) {
 
   gfx.drawWideLine(x0, y0, x1, y1, radar::kRunwayLineHalfWidth,
                    radar::kColorRunway);
+  if (out != nullptr) {
+    out[0] = x0;
+    out[1] = y0;
+    out[2] = x1;
+    out[3] = y1;
+  }
   return true;
 }
 
@@ -233,6 +239,23 @@ void clipPointOntoOuterRing(int* x, int* y) {
   const float scale = static_cast<float>(r) / sqrtf(static_cast<float>(d_sq));
   *x = cx + static_cast<int>(lroundf(static_cast<float>(dx) * scale));
   *y = cy + static_cast<int>(lroundf(static_cast<float>(dy) * scale));
+}
+
+// Draws the ident with its bottom-left corner at (x, y), kept inside the radar square.
+void drawLabelUpRight(lgfx::LGFXBase& gfx, const char* ident, int x, int y) {
+  const int tw = gfx.textWidth(ident);
+  const int th = gfx.fontHeight();
+  constexpr int kPadX = 2;
+  constexpr int kPadY = 1;
+  constexpr int kEdge = 1;
+
+  if (x + tw + kPadX > radar::kSize - kEdge) x = radar::kSize - kEdge - kPadX - tw;
+  if (x - kPadX < kEdge) x = kEdge + kPadX;
+  if (y - th - kPadY < kEdge) y = kEdge + kPadY + th;
+  if (y > radar::kSize - kEdge) y = radar::kSize - kEdge;
+
+  const int mx = x + tw / 2;  // drawBoldRunwayLabel centres on mx, bottom on y
+  drawBoldRunwayLabel(gfx, ident, mx, y);
 }
 
 template <typename AirportT>
@@ -309,9 +332,32 @@ void drawAirportRunways_impl(lgfx::LGFXBase& gfx,
     }
   }
 
+  // Per labelled airport: right-most x and top-most y of its runways on screen,
+  // so the name can sit above-right of them instead of on top of them.
+  int label_max_x[kMaxAirportLabels];
+  int label_min_y[kMaxAirportLabels];
+  bool label_has_rw[kMaxAirportLabels];
+  for (size_t j = 0; j < s_cached_airport_count; ++j) label_has_rw[j] = false;
+
   // Draw cached runways
   for (size_t i = 0; i < s_cached_runway_count; ++i) {
-    drawRunwayLine(gfx, runways[s_cached_runways[i]]);
+    const auto& rw = runways[s_cached_runways[i]];
+    int pts[4];
+    if (!drawRunwayLine(gfx, rw, pts)) continue;
+    for (size_t j = 0; j < s_cached_airport_count; ++j) {
+      if (s_cached_airports[j] != rw.airport_idx) continue;
+      const int rx = pts[0] > pts[2] ? pts[0] : pts[2];
+      const int ry = pts[1] < pts[3] ? pts[1] : pts[3];
+      if (!label_has_rw[j]) {
+        label_max_x[j] = rx;
+        label_min_y[j] = ry;
+        label_has_rw[j] = true;
+      } else {
+        if (rx > label_max_x[j]) label_max_x[j] = rx;
+        if (ry < label_min_y[j]) label_min_y[j] = ry;
+      }
+      break;
+    }
   }
 
   if (s_cached_airport_count == 0) return;
@@ -319,7 +365,13 @@ void drawAirportRunways_impl(lgfx::LGFXBase& gfx,
   initRunwayLabelStyle(gfx);
   applyRunwayLabelStyle(gfx);
   for (size_t i = 0; i < s_cached_airport_count; ++i) {
-    drawAirportLabel(gfx, airports[s_cached_airports[i]]);
+    const auto& ap = airports[s_cached_airports[i]];
+    if (label_has_rw[i]) {
+      const int gap = radar::kRunwayLabelGapPx;
+      drawLabelUpRight(gfx, ap.ident, label_max_x[i] + gap, label_min_y[i] - gap);
+    } else {
+      drawAirportLabel(gfx, ap);
+    }
   }
 }
 
