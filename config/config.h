@@ -103,4 +103,9 @@ constexpr char kTimezoneDefault[] = "UTC0"; // Default: UTC
 constexpr bool kRadarSweepEnabled = true;
 constexpr float kRadarSweepDurationMs = 6000.0f; // Time (ms) for one full rotation
 
+// --- Screensaver (matrix rain after no touch / BOOT press) ---
+constexpr int kScreensaverDefaultMin = 1;        // 1 min for testing; 0 = off
+constexpr uint8_t kScreensaverBrightness = 80;   // backlight while it runs
+constexpr unsigned long kScreensaverFrameMs = 50;  // fastest streams move 1 row per frame
+
 }  // namespace config

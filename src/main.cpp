@@ -15,6 +15,7 @@
 #include "secrets.h"
 #include "ui/radar_display.h"
 #include "ui/radar_range.h"
+#include "ui/screensaver.h"
 #include "ui/status_screens.h"
 #include "ui/settings_menu.h"
 
@@ -23,6 +24,7 @@ namespace {
 bool g_radar_visible = false;
 bool g_screen_on = true;
 unsigned long g_last_adsb_fetch_ms = 0;
+unsigned long g_last_activity_ms = 0;  // last touch / BOOT press, for the screensaver
 
 WifiManager wifiManager(WIFI_SSID, WIFI_PASSWORD);
 ButtonManager bootButton(0);
@@ -43,7 +45,9 @@ void updateBrightness() {
   static uint8_t s_current_brightness = 255;
   uint8_t target_brightness = 255;
 
-  if (ui::settings::isAutoDimmingEnabled()) {
+  if (ui::screensaver::isActive()) {
+    target_brightness = config::kScreensaverBrightness;
+  } else if (ui::settings::isAutoDimmingEnabled()) {
     static unsigned long s_last_time_check = 0;
     static struct tm s_timeinfo;
     static bool s_time_valid = false;
@@ -81,8 +85,22 @@ void onRangeTap() {
   }
 }
 
+void wakeFromScreensaver() {
+  ui::screensaver::end();
+  if (g_radar_visible) {
+    ui::radarDisplayDraw();
+  }
+}
+
 void handleInput() {
   ButtonAction action = bootButton.update(millis());
+  if (action != ButtonAction::NONE) {
+    g_last_activity_ms = millis();
+    if (ui::screensaver::isActive()) {
+      wakeFromScreensaver();  // the press only wakes the screen
+      action = ButtonAction::NONE;
+    }
+  }
   if (action == ButtonAction::SINGLE_PRESS) {
     if (!g_screen_on) {
       g_screen_on = true;
@@ -104,6 +122,7 @@ void handleInput() {
   static unsigned long s_touch_start_ms = 0;
   static uint16_t s_tap_x = 0;
   static uint16_t s_tap_y = 0;
+  static bool s_ignore_until_release = false;  // the touch that woke the screensaver
   uint16_t tx = 0, ty = 0;
   bool is_touched = tft.getTouch(&tx, &ty);
 #ifdef TOUCH_DEBUG
@@ -115,6 +134,11 @@ void handleInput() {
 #endif
   
   if (is_touched) {
+    g_last_activity_ms = millis();
+    if (ui::screensaver::isActive()) {
+      wakeFromScreensaver();
+      s_ignore_until_release = true;
+    }
     if (!s_was_touched) {
       s_was_touched = true;
       s_touch_start_ms = millis();
@@ -125,7 +149,9 @@ void handleInput() {
   } else if (!is_touched && s_was_touched) {
     s_was_touched = false;
     unsigned long duration = millis() - s_touch_start_ms;
-    if (ui::settings::isVisible()) {
+    if (s_ignore_until_release) {
+      s_ignore_until_release = false;
+    } else if (ui::settings::isVisible()) {
        // LVGL handles touch when visible
     } else if (duration > 40 && duration < 600) {
       // Tap the range scale label (bottom right of the radar) to cycle ranges.
@@ -230,6 +256,8 @@ void loop() {
 
 
   if (current_state != g_last_wifi_state) {
+    ui::screensaver::end();  // let the status screens / radar redraw
+    g_last_activity_ms = millis();
     if (current_state == WIFI_STATE_CONNECTED) {
       configTzTime(ui::settings::getTimezoneStr(), config::kNtpServer);
       showRadarIfConnected();
@@ -254,7 +282,15 @@ void loop() {
     if (!g_radar_visible) {
       showRadarIfConnected();
     } else {
-      if (!ui::settings::isVisible() && g_screen_on) {
+      const unsigned long ss_timeout_ms = ui::settings::getScreensaverTimeoutMs();
+      if (ss_timeout_ms > 0 && !ui::screensaver::isActive() && !ui::settings::isVisible() &&
+          millis() - g_last_activity_ms >= ss_timeout_ms) {
+        ui::screensaver::begin();
+      }
+
+      if (ui::screensaver::isActive()) {
+        ui::screensaver::tick();
+      } else if (!ui::settings::isVisible() && g_screen_on) {
         static unsigned long s_last_sweep_ms = 0;
         unsigned long interval = ui::settings::isRadarSweepEnabled() ? 50 : 1000;
         if (millis() - s_last_sweep_ms >= interval) {
@@ -274,14 +310,14 @@ void loop() {
         if (g_fetch_success) {
           consecutive_failures = 0;
           ui::radarDisplaySetStale(false);
-          if (!ui::settings::isVisible()) {
+          if (!ui::settings::isVisible() && !ui::screensaver::isActive()) {
             ui::radarDisplayRefreshAircraft();
           }
         } else {
           consecutive_failures++;
           if (consecutive_failures >= 3) {
             ui::radarDisplaySetStale(true);
-            if (!ui::settings::isVisible()) {
+            if (!ui::settings::isVisible() && !ui::screensaver::isActive()) {
               ui::radarDisplayRefreshAircraft();
             }
           }

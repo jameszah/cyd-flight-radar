@@ -303,6 +303,76 @@ static void tz_btn_event_cb(lv_event_t * e) {
     lv_label_set_text(tz_val_label, tz_presets[s_tz_idx].label);
 }
 
+static const int ss_presets_min[] = {0, 1, 5, 10, 30, 60};  // 0 = off
+static const int num_ss_presets = sizeof(ss_presets_min)/sizeof(ss_presets_min[0]);
+static int s_ss_idx = 1;
+static lv_obj_t * ss_val_label = nullptr;
+
+static void update_ss_label() {
+    if (ss_presets_min[s_ss_idx] == 0) {
+        lv_label_set_text(ss_val_label, "Off");
+    } else {
+        lv_label_set_text_fmt(ss_val_label, "%d min", ss_presets_min[s_ss_idx]);
+    }
+}
+
+static void ss_btn_event_cb(lv_event_t * e) {
+    intptr_t dir = (intptr_t)lv_event_get_user_data(e);
+    s_ss_idx += dir;
+    if (s_ss_idx < 0) s_ss_idx = num_ss_presets - 1;
+    if (s_ss_idx >= num_ss_presets) s_ss_idx = 0;
+    s_prefs.putInt("ss_min", ss_presets_min[s_ss_idx]);
+    update_ss_label();
+}
+
+static lv_obj_t* create_screensaver_row(lv_obj_t * parent) {
+    lv_obj_t * row = lv_obj_create(parent);
+    lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_size(row, LV_PCT(100), 75);
+    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_bg_color(row, get_lv_color(getCatppuccinFlavor(s_theme_flavor).mantle), 0);
+    lv_obj_set_style_border_width(row, 0, 0);
+    lv_obj_set_style_pad_all(row, 10, 0);
+
+    lv_obj_t * lbl = lv_label_create(row);
+    lv_label_set_text(lbl, "Screensaver");
+    lv_obj_set_style_text_color(lbl, get_lv_color(getCatppuccinFlavor(s_theme_flavor).text), 0);
+    lv_obj_set_width(lbl, LV_PCT(100));
+
+    lv_obj_t * controls = lv_obj_create(row);
+    lv_obj_set_size(controls, LV_PCT(100), LV_SIZE_CONTENT);
+    lv_obj_set_style_bg_opa(controls, 0, 0);
+    lv_obj_set_style_border_width(controls, 0, 0);
+    lv_obj_set_style_pad_all(controls, 0, 0);
+    lv_obj_set_flex_flow(controls, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(controls, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+
+    lv_obj_t * btn_minus = lv_btn_create(controls);
+    lv_obj_set_size(btn_minus, 35, 30);
+    lv_obj_add_event_cb(btn_minus, ss_btn_event_cb, LV_EVENT_CLICKED, (void*)(intptr_t)-1);
+    lv_obj_set_style_bg_color(btn_minus, get_lv_color(getCatppuccinFlavor(s_theme_flavor).overlay), 0);
+    lv_obj_t * lbl_minus = lv_label_create(btn_minus);
+    lv_label_set_text(lbl_minus, "<");
+    lv_obj_center(lbl_minus);
+
+    ss_val_label = lv_label_create(controls);
+    update_ss_label();
+    lv_obj_set_style_text_color(ss_val_label, get_lv_color(getCatppuccinFlavor(s_theme_flavor).blue), 0);
+    lv_obj_set_flex_grow(ss_val_label, 1);
+    lv_obj_set_style_text_align(ss_val_label, LV_TEXT_ALIGN_CENTER, 0);
+
+    lv_obj_t * btn_plus = lv_btn_create(controls);
+    lv_obj_set_size(btn_plus, 35, 30);
+    lv_obj_add_event_cb(btn_plus, ss_btn_event_cb, LV_EVENT_CLICKED, (void*)(intptr_t)1);
+    lv_obj_set_style_bg_color(btn_plus, get_lv_color(getCatppuccinFlavor(s_theme_flavor).overlay), 0);
+    lv_obj_t * lbl_plus = lv_label_create(btn_plus);
+    lv_label_set_text(lbl_plus, ">");
+    lv_obj_center(lbl_plus);
+
+    return row;
+}
+
 static lv_obj_t * range_val_label = nullptr;
 
 static void update_range_label() {
@@ -536,6 +606,7 @@ static void build_ui() {
     create_slider_row(list, "Max Planes", 1, services::adsb::kMaxAircraft, s_max_aircraft, "", max_aircraft_slider_event_cb);
     create_slider_row(list, "Sweep Speed", 1000, 15000, s_sweep_speed, "ms", sweep_speed_slider_event_cb);
     create_timezone_row(list);
+    create_screensaver_row(list);
     create_range_row(list);
     create_theme_row(list);
     
@@ -569,6 +640,13 @@ void setup() {
     for (int i = 0; i < num_tz_presets; ++i) {
         if (tz == tz_presets[i].value) {
             s_tz_idx = i;
+            break;
+        }
+    }
+    const int ss_min = s_prefs.getInt("ss_min", config::kScreensaverDefaultMin);
+    for (int i = 0; i < num_ss_presets; ++i) {
+        if (ss_min == ss_presets_min[i]) {
+            s_ss_idx = i;
             break;
         }
     }
@@ -653,6 +731,7 @@ bool isAutoDimmingEnabled() { return s_auto_dimming; }
 int getMaxAltitudeFilter() { return s_max_altitude; }
 int getSweepRotationSpeedMs() { return s_sweep_speed; }
 int getMaxAircraftLimit() { return s_max_aircraft; }
+unsigned long getScreensaverTimeoutMs() { return ss_presets_min[s_ss_idx] * 60000UL; }
 
 bool isTimezoneChanged() { return s_tz_changed; }
 void clearTimezoneChanged() { s_tz_changed = false; }

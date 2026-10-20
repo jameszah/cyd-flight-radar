@@ -18,6 +18,7 @@ bool isAutoDimmingEnabled();
 int getMaxAltitudeFilter();
 int getSweepRotationSpeedMs();
 int getMaxAircraftLimit();
+unsigned long getScreensaverTimeoutMs();  // 0 = screensaver off
 bool isTimezoneChanged();
 void clearTimezoneChanged();
 const char* getTimezoneStr();

@@ -83,6 +83,18 @@ Built and flashed from VS Code + PlatformIO on Windows. `fnk0104b` is the defaul
 - Not verified: touch calibration (raw 300..3900, y reversed: a guess), colours, whether the
   100 KB 320x320 sprite plus TLS fit in heap (fallback: `RADAR_SIZE=240`).
 
+- Screensaver (`src/ui/screensaver.cpp`): matrix rain (from a pasted blocking sketch, made non-blocking:
+  `begin/tick/end`, ticked from `loop()` every `kScreensaverFrameMs` (50), straight to `tft`).
+  Reworked to look like the film: one stream per 7x12 column, halfwidth katakana (U+FF66-FF9D) + digits
+  from `fonts::lgfxJapanGothic_12` (+~110 KB flash), 8-shade fade (pale head -> dark green), trails
+  rows/3..rows, a few random glyph changes inside trails per frame. A malloc'd glyph grid (cols*rows bytes,
+  ~1.8 KB) lets trails fade without changing glyphs; freed on exit. Not yet seen on hardware.
+  Starts after `getScreensaverTimeoutMs()` with no touch/BOOT press, only while the radar is up and settings
+  closed; backlight drops to `kScreensaverBrightness` (80; 40 hid the dark greens). Fetches keep running, radar redraws are skipped.
+  The waking touch/press is swallowed, then `radarDisplayDraw()`. Wi-Fi state changes end it.
+  Settings row "Screensaver": Off/1/5/10/30/60 min, pref `"ss_min"`, default `kScreensaverDefaultMin` = 1
+  (for testing; raise to 30 later).
+
 ## Not yet verified on hardware
 - Range-label tap (just re-enabled) and the airport label placement.
 - Route lookup: watch serial for `route: ... HTTP 200` / `route: X -> Y` and the `heap[...]` lines.
