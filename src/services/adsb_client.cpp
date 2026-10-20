@@ -107,7 +107,9 @@ JsonDocument& routeFilterDoc() {
 
 void init() {
   filterDoc();
+#ifndef NO_ROUTE_LOOKUP
   routeFilterDoc();
+#endif
   s_client.setInsecure();
 }
 
@@ -445,6 +447,13 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
 }
 
 void requestRouteFetch(const char* callsign, const char* hex) {
+#ifdef NO_ROUTE_LOOKUP
+  // Route (city pair) lookup turned off for this board: nothing is queued, so
+  // fetchUpdate() never calls fetchRoute() and the info panel shows no route.
+  (void)callsign;
+  (void)hex;
+  return;
+#endif
   if (callsign == nullptr || hex == nullptr) return;
   strncpy(s_route_callsign, callsign, sizeof(s_route_callsign) - 1);
   s_route_callsign[sizeof(s_route_callsign) - 1] = '\0';

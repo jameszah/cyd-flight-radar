@@ -109,3 +109,22 @@ pio device monitor -e fnk0104b
 - Touch is the FT6336 on I2C (SDA 16, SCL 15, RST 18, INT 17). If taps land in the wrong place, change `cfg.offset_rotation` (0-3) in `include/hardware/lgfx_config.hpp`.
 - If colours look inverted (black background shows white), remove `-D TFT_INVERT=1` from the `fnk0104b` env.
 - First boot opens the `cyd-flight-radar-XXXX` Wi-Fi portal to set your network and radar location.
+
+## Freenove FNK0103N (ESP32, 3.5" ST7796 320x480, resistive touch)
+
+Branch `FNK0103N`, PlatformIO env `fnk0103n` (the default on this branch):
+
+    pio run -e fnk0103n -t upload
+    pio device monitor -e fnk0103n
+
+- Pins follow Freenove's `FNK0114N_3.5_320x480_ST7796.h`: LCD MOSI 13, MISO 12, SCLK 14, CS 15,
+  DC 2, BL 27. The XPT2046 touch shares that SPI bus with CS 33 (`XPT2046_SHARED_CS`).
+- `RADAR_SIZE` sets the radar square. 320 fills the width but needs a 100 KB frame sprite on a board
+  without PSRAM, and it showed "Connection Lost". The env keeps a 240px radar and uses the rest of
+  the screen (`PLANE_LIST`): clock and aircraft count to the right, and a list of every aircraft
+  below, two lines each (flight, type, description, heading / registration, altitude, speed, climb
+  rate, distance and direction; tap one to select it). `RADAR_ZOOM=1` instead
+  stretches the radar to 320px.
+- `NO_ROUTE_LOOKUP=1` skips the adsbdb.com route (city pair) lookup.
+- `TOUCH_DEBUG=1` prints each tap's coordinates to serial. Use it to tune `x_min/x_max/y_min/y_max`
+  in `include/hardware/lgfx_config.hpp`.

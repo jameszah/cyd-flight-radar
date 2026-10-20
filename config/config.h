@@ -47,8 +47,9 @@ constexpr int kDisplayHeight = TFT_HEIGHT;
 constexpr uint32_t kDisplaySpiWriteHz = 40000000;
 // GC9A01 modules often need invert + BGR for correct black/green output
 constexpr bool kDisplayInvert = true;
-#if defined(BOARD_FNK0104B)
-// FNK0104B's ILI9341 is native RGB: no software R/B swap.
+#if defined(BOARD_FNK0104B) || defined(BOARD_FNK0103N)
+// FNK0104B's ILI9341 / FNK0103N's ST7796: LovyanGFX already sets the panel's colour order,
+// so no software R/B swap. (If red planes show blue on the FNK0103N, make this true.)
 constexpr bool kDisplayRgbOrder = false;
 #else
 constexpr bool kDisplayRgbOrder = true;

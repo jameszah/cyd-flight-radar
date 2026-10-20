@@ -106,6 +106,13 @@ void handleInput() {
   static uint16_t s_tap_y = 0;
   uint16_t tx = 0, ty = 0;
   bool is_touched = tft.getTouch(&tx, &ty);
+#ifdef TOUCH_DEBUG
+  if (is_touched && !s_was_touched) {
+    lgfx::touch_point_t raw;
+    tft.getTouchRaw(&raw, 1);
+    Serial.printf("touch: x=%u y=%u (raw %d,%d)\n", tx, ty, raw.x, raw.y);
+  }
+#endif
   
   if (is_touched) {
     if (!s_was_touched) {
@@ -160,7 +167,11 @@ void triggerFetch() {
         NULL,               // Task input parameter
         1,                  // Priority of the task
         &g_fetch_task,      // Task handle
+#ifdef FETCH_CORE
+        FETCH_CORE);        // Core where the task should run (0 = network, 1 = UI)
+#else
         1);                 // Core where the task should run (0 = network, 1 = UI)
+#endif
   }
   xTaskNotifyGive(g_fetch_task);
 }

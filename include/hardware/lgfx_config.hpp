@@ -15,6 +15,9 @@ class LGFX : public lgfx::LGFX_Device {
 #endif
 #elif defined(ST7796_DRIVER)
   lgfx::Panel_ST7796 _panel;
+#ifdef XPT2046_SHARED_CS
+  lgfx::Touch_XPT2046 _touch;  // Freenove FNK0103N: on the LCD's SPI bus
+#endif
 #else
   lgfx::Panel_GC9A01 _panel;
 #endif
@@ -25,7 +28,11 @@ public:
     {
       auto cfg = _bus.config();
       cfg.spi_host = SPI2_HOST;
+#ifdef TFT_SPI_HZ
+      cfg.freq_write = TFT_SPI_HZ;
+#else
       cfg.freq_write = 40000000;
+#endif
       cfg.pin_sclk = TFT_SCLK;
       cfg.pin_mosi = TFT_MOSI;
       cfg.pin_miso = TFT_MISO;
@@ -98,6 +105,26 @@ public:
       cfg.pin_mosi = XPT2046_MOSI;
       cfg.pin_miso = XPT2046_MISO;
       cfg.pin_cs   = XPT2046_CS;
+      _touch.config(cfg);
+      _panel.setTouch(&_touch);
+    }
+#elif defined(ST7796_DRIVER) && defined(XPT2046_SHARED_CS)
+    {
+      auto cfg = _touch.config();
+      // Raw AD limits; check with TOUCH_DEBUG on serial and adjust if taps land off target.
+      cfg.x_min      = 300;
+      cfg.x_max      = 3900;
+      cfg.y_min      = 3900;
+      cfg.y_max      = 300;
+      cfg.pin_int    = -1;    // no IRQ line in Freenove's setup: poll pressure instead
+      cfg.bus_shared = true;  // same SPI bus as the LCD
+      cfg.offset_rotation = 0;
+      cfg.spi_host = SPI2_HOST;
+      cfg.freq = 1000000;
+      cfg.pin_sclk = TFT_SCLK;
+      cfg.pin_mosi = TFT_MOSI;
+      cfg.pin_miso = TFT_MISO;
+      cfg.pin_cs   = XPT2046_SHARED_CS;
       _touch.config(cfg);
       _panel.setTouch(&_touch);
     }

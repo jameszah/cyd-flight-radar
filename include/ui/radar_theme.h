@@ -4,12 +4,27 @@
 
 namespace ui::radar {
 
+/** Radar square edge (px): RADAR_SIZE build flag, else the display width, else 240. */
+#if defined(RADAR_SIZE)
+constexpr int kSize = RADAR_SIZE;
+#elif defined(TFT_WIDTH)
+constexpr int kSize = TFT_WIDTH;
+#else
 constexpr int kSize = 240;
+#endif
 constexpr int kCenterX = kSize / 2;
 constexpr int kCenterY = kSize / 2;
 
-/** Outermost grid ring (inside edge labels). */
-constexpr int kGridOuterRadius = 107;
+/** Radar square as shown on screen: the frame sprite is scaled up to the display width when
+ *  that's bigger than kSize and RADAR_ZOOM is set (240 px frame shown at 320 px; looks blocky). */
+#if defined(TFT_WIDTH) && defined(RADAR_ZOOM)
+constexpr int kShownSize = TFT_WIDTH > kSize ? TFT_WIDTH : kSize;
+#else
+constexpr int kShownSize = kSize;
+#endif
+
+/** Outermost grid ring (inside edge labels): 107 px on the 240 px radar, scaled with kSize. */
+constexpr int kGridOuterRadius = kSize * 107 / 240;
 
 /** N: offset from top edge (top_center, negative = up). */
 constexpr int kCardinalNorthOffsetY = -1;

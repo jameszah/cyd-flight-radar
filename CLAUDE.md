@@ -57,6 +57,32 @@ Built and flashed from VS Code + PlatformIO on Windows. `fnk0104b` is the defaul
   `setup()`); it was never persisted, so it reset to UTC every boot. `airports`, `med_airports`, `auto_dim`
   were saved but never loaded; `setup()` now reads them back too.
 
+## Branch `FNK0103N`: Freenove FNK0103N port (ESP32 classic, 3.5" ST7796 320x480, XPT2046 resistive)
+- `[env:fnk0103n]` (extends `cyd_base`, esp32dev) is the default env on this branch; `fnk0104b` still builds.
+- Pins from Freenove's FNK0114N TFT_eSPI setup: same as `cyd_35c` (MOSI 13, MISO 12, SCLK 14, CS 15,
+  DC 2, BL 27). Touch is an XPT2046 on the LCD's SPI bus, CS 33 (`XPT2046_SHARED_CS`, `bus_shared`, no IRQ).
+- `radar::kSize` = `RADAR_SIZE` / `TFT_WIDTH` / 240; `kGridOuterRadius` scales with it (107 @ 240).
+  The bottom panel uses `config::kDisplayWidth/Height` instead of literal 240/320.
+- `RADAR_SIZE=320` gave "Connection Lost" on hardware (probably heap: 100 KB sprite + TLS), so the env
+  uses `RADAR_SIZE=240` (heap log: largest free block ~39 KB, so a 102 KB sprite can't fit). The 240 frame
+  is scaled to 320 on push (`radar::kShownSize`, `pushFrameScaled`: nearest-neighbour rows via an RGB332
+  LUT; `pushRotateZoomWithAA` managed ~1 fps); touch goes through `screenToFrame`. Env also sets
+  `TFT_SPI_HZ=80000000`, `SWEEP_LINES=1`, `FETCH_CORE=0` (fetch task was pinned to core 1 with the UI).
+  Heap: with 115 KB static RAM the TLS handshake failed (`SSL - Memory allocation failed`, largest free
+  block ~32 KB). Env now sets `TRAIL_LENGTH=6`, `MAX_AIRCRAFT=20`, and lv_conf.h uses `LV_MEM_CUSTOM 1`
+  (malloc) under `BOARD_FNK0103N`: static RAM 115.9 KB -> 76.6 KB. Verified: TLS works again.
+- The 1.33x zoom looked blocky, so zoom is now opt-in (`RADAR_ZOOM`); the env sets `PLANE_LIST` instead
+  (`drawListLayout` in `radar_display.cpp`): 240 radar top-left; 80px side strip with clock, aircraft
+  count, version; below it every aircraft closest-first, two lines each (font 0.7 of the 15px vlw):
+  flight/type/description/heading in its icon colour, then reg/alt/speed/climb/distance+compass in grey
+  (existing fields only, no extra queries). Column geometry: `kListLine1/2` (`ListCol`).
+  Tapping a row selects it (`s_list_hex` row map in `radarDisplayHandleTouch`); the selected aircraft's
+  details (`drawSelectedLines`) go above the list. Not yet verified on hardware. `NO_ROUTE_LOOKUP` turns the
+  adsbdb route query off for this env (`requestRouteFetch` returns early). Board is on COM10.
+- `kDisplayRgbOrder` false for FNK0103N too. `TOUCH_DEBUG` prints tap coordinates on serial.
+- Not verified: touch calibration (raw 300..3900, y reversed: a guess), colours, whether the
+  100 KB 320x320 sprite plus TLS fit in heap (fallback: `RADAR_SIZE=240`).
+
 ## Not yet verified on hardware
 - Range-label tap (just re-enabled) and the airport label placement.
 - Route lookup: watch serial for `route: ... HTTP 200` / `route: X -> Y` and the `heap[...]` lines.

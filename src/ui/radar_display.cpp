@@ -852,7 +852,11 @@ void drawRadarSweep(lgfx::LovyanGFX& gfx) {
   
   // Draw fading trail. kSweepLines sets how many lines make up the beam
   // (was 20, about 30 deg wide); kSweepStepDeg is the gap between them.
+#ifdef SWEEP_LINES
+  constexpr int kSweepLines = SWEEP_LINES;
+#else
   constexpr int kSweepLines = 7;
+#endif
   constexpr float kSweepStepDeg = 1.5f;
   for (int i = kSweepLines - 1; i >= 0; --i) {
     const float trail_angle_deg = current_angle_deg - i * kSweepStepDeg;
@@ -883,6 +887,45 @@ void drawRadarSweep(lgfx::LovyanGFX& gfx) {
   }
 }
 
+// Blit the kSize frame sprite enlarged to kShownSize (nearest neighbour), one screen row at a
+// time. pushRotateZoomWithAA did the same job at ~1 frame/s on the classic ESP32.
+void pushFrameScaled() {
+  constexpr int kOut = radar::kShownSize;
+  static uint16_t s_lut[256];  // RGB332 sprite byte -> byte-swapped RGB565 for the panel
+  static uint16_t s_src_x[kOut];
+  static bool s_init = false;
+  if (!s_init) {
+    for (int c = 0; c < 256; ++c) {
+      const uint8_t r3 = (c >> 5) & 0x07;
+      const uint8_t g3 = (c >> 2) & 0x07;
+      const uint8_t b2 = c & 0x03;
+      const uint16_t rgb = lgfx::color565((r3 * 255) / 7, (g3 * 255) / 7, (b2 * 255) / 3);
+      s_lut[c] = static_cast<uint16_t>((rgb >> 8) | (rgb << 8));
+    }
+    for (int x = 0; x < kOut; ++x) {
+      s_src_x[x] = static_cast<uint16_t>(x * radar::kSize / kOut);
+    }
+    s_init = true;
+  }
+  static uint16_t s_line[kOut];
+  const uint8_t* src = static_cast<const uint8_t*>(s_frame.getBuffer());
+  tft.startWrite();
+  tft.setAddrWindow(0, 0, kOut, kOut);
+  int built_row = -1;
+  for (int y = 0; y < kOut; ++y) {
+    const int sy = y * radar::kSize / kOut;
+    if (sy != built_row) {  // repeated source rows reuse the line already built
+      const uint8_t* row = src + sy * radar::kSize;
+      for (int x = 0; x < kOut; ++x) {
+        s_line[x] = s_lut[row[s_src_x[x]]];
+      }
+      built_row = sy;
+    }
+    tft.writePixels(reinterpret_cast<const lgfx::swap565_t*>(s_line), kOut);
+  }
+  tft.endWrite();
+}
+
 // Double-buffered frame: composite the grid AND aircraft into the off-screen
 // sprite, then blit it to the panel in a single pushSprite. Because the panel
 // is updated in one pass, labels never show an erase/redraw gap — no flicker.
@@ -893,7 +936,11 @@ void renderFrame() {
     const DrawScope scope(s_frame);
     drawAircraft();
   }
-  s_frame.pushSprite(0, 0);
+  if (radar::kShownSize != radar::kSize) {
+    pushFrameScaled();
+  } else {
+    s_frame.pushSprite(0, 0);
+  }
   tft.setTextDatum(textdatum_t::top_left);
 }
 
@@ -907,6 +954,10 @@ uint16_t downsampleColor(uint16_t c) {
   return (r5 << 11) | (g6 << 5) | b5;
 }
 
+// Bottom status/details panel spans the full screen below the radar square.
+constexpr int kScreenW = config::kDisplayWidth;
+constexpr int kScreenH = config::kDisplayHeight;
+
 void drawAppVersion() {
   tft.setTextDatum(textdatum_t::bottom_right);
   uint16_t bg = s_frame_ready ? downsampleColor(radar::kColorBackground) : radar::kColorBackground;
@@ -918,7 +969,7 @@ void drawAppVersion() {
     displayFontSetBitmap(tft, &fonts::FreeSansBold12pt7b);
   }
   tft.setTextPadding(100);
-  tft.drawString(config::kAppVersion, 238, 318);
+  tft.drawString(config::kAppVersion, kScreenW - 2, kScreenH - 2);
   tft.setTextPadding(0);
 }
 
@@ -942,7 +993,7 @@ void drawClock() {
     displayFontSetBitmap(tft, &fonts::FreeSansBold12pt7b);
   }
   tft.setTextPadding(50);
-  tft.drawString(time_str, 2, 318);
+  tft.drawString(time_str, 2, kScreenH - 2);
   tft.setTextPadding(0);
 }
 
@@ -959,63 +1010,13 @@ void drawAircraftCount() {
   char buf[32];
   snprintf(buf, sizeof(buf), "%u aircraft", static_cast<unsigned>(s_visible_aircraft_count));
   tft.setTextPadding(80);
-  tft.drawString(buf, 120, 318);
+  tft.drawString(buf, kScreenW / 2, kScreenH - 2);
   tft.setTextPadding(0);
 }
 
-void drawDetailsPanel() {
-  uint16_t bg = s_frame_ready ? downsampleColor(radar::kColorBackground) : radar::kColorBackground;
-  tft.drawFastHLine(0, radar::kSize, 240, radar::kColorGrid);
-  drawAppVersion();
-  drawClock();
-  drawAircraftCount();
-
-  if (s_data_stale) {
-    tft.fillRect(0, 320 - 24, 240, 24, lgfx::color565(200, 0, 0));
-    tft.setTextColor(lgfx::color565(255, 255, 255), lgfx::color565(200, 0, 0));
-    tft.setTextDatum(textdatum_t::middle_center);
-    displayFontEnsureLoaded(tft);
-    if (displayFontIsSmooth()) {
-      displayFontSetSmoothSize(tft, 0.7f);
-    } else {
-      displayFontSetBitmap(tft, &fonts::FreeSansBold9pt7b);
-    }
-    tft.drawString("Connection Lost", 120, 320 - 12);
-    // Draw on top of everything at the bottom of the screen
-  }
-
-  if (s_selected_hex[0] == '\0') {
-    tft.setTextDatum(textdatum_t::middle_center);
-    tft.setTextColor(radar::kColorLabel, bg);
-    displayFontEnsureLoaded(tft);
-    if (displayFontIsSmooth()) {
-      displayFontSetSmoothSize(tft, 1.2f);
-    } else {
-      displayFontSetBitmap(tft, &fonts::FreeSansBold12pt7b);
-    }
-    tft.setTextPadding(240);
-    tft.drawString("CYD Flight Radar", 120, radar::kSize + (320 - radar::kSize) / 2);
-    tft.setTextPadding(0);
-    // Clear the rest of the lines
-    tft.fillRect(0, radar::kSize + 4, 240, (320 - radar::kSize) / 2 - 12, bg);
-    tft.fillRect(0, radar::kSize + (320 - radar::kSize) / 2 + 12, 240, (320 - radar::kSize) / 2 - 24, bg);
-    return;
-  }
-  
-  const services::adsb::Aircraft* planes = services::adsb::aircraftList();
-  const size_t n = services::adsb::aircraftCount();
-  const services::adsb::Aircraft* ac = nullptr;
-  for (size_t i = 0; i < n; ++i) {
-    if (strcmp(planes[i].hex, s_selected_hex) == 0) {
-      ac = &planes[i];
-      break;
-    }
-  }
-  
-  if (!ac) {
-    return; // Selected aircraft disappeared
-  }
-  
+// Selected aircraft: callsign/reg, type, altitude/speed, distance/route, from y = ly.
+// Returns the y below the last line.
+int drawSelectedLines(const services::adsb::Aircraft* ac, int ly, uint16_t bg) {
   tft.setTextDatum(textdatum_t::top_left);
   displayFontEnsureLoaded(tft);
   if (displayFontIsSmooth()) {
@@ -1025,10 +1026,9 @@ void drawDetailsPanel() {
   }
   
   const int lh = tft.fontHeight();
-  int ly = radar::kSize + 4;
   char buf[64];
   tft.setTextColor(radar::kColorLabel, bg);
-  tft.setTextPadding(236);
+  tft.setTextPadding(kScreenW - 4);
   if (ac->reg[0] != '\0') {
     snprintf(buf, sizeof(buf), "%s (%s)%s", ac->callsign, ac->reg, ac->is_military ? " [MIL]" : "");
   } else {
@@ -1071,9 +1071,307 @@ void drawDetailsPanel() {
     snprintf(buf + strlen(buf), sizeof(buf) - strlen(buf), " | %s -> %s", ac->route_origin, ac->route_destination);
   }
   tft.drawString(buf, 4, ly);
+  ly += lh;
+  tft.setTextPadding(0);
+  return ly;
+}
+
+#ifdef PLANE_LIST
+// List layout (FNK0103N, 320x480): radar square top-left, a side strip to its right with
+// clock / aircraft count / version, and every aircraft listed below the radar, closest
+// first, two lines each in its icon colour. Tap an entry to select that aircraft.
+constexpr int kSideX = radar::kShownSize + 1;
+constexpr int kSideW = kScreenW - kSideX;
+constexpr int kSideCx = kSideX + kSideW / 2;
+constexpr int kListTop = radar::kShownSize + 1;
+constexpr int kBannerH = 24;                      // "Connection Lost" strip at the very bottom
+constexpr int kListBottom = kScreenH - kBannerH;
+constexpr int kMaxListRows = services::adsb::kMaxAircraft;
+
+char s_list_hex[kMaxListRows][7];
+int s_list_rows = 0;      // aircraft rows currently on screen
+int s_list_rows_top = 0;  // y of the first aircraft row
+int s_list_row_h = 16;
+bool s_list_had_details = false;
+bool s_list_needs_clear = true;
+
+void setListFont(float smooth_size) {
+  displayFontEnsureLoaded(tft);
+  if (displayFontIsSmooth()) {
+    displayFontSetSmoothSize(tft, smooth_size);
+  } else {
+    displayFontSetBitmap(tft, &fonts::FreeSansBold9pt7b);
+  }
+}
+
+void drawSidePanel(uint16_t bg) {
+  tft.drawFastVLine(radar::kShownSize, 0, radar::kShownSize, radar::kColorGrid);
+  const uint16_t grey = lgfx::color565(120, 120, 120);
+  char buf[16];
+  struct tm timeinfo;
+  if (!getLocalTime(&timeinfo, 0)) {
+    strcpy(buf, "--:--");
+  } else {
+    strftime(buf, sizeof(buf), "%H:%M", &timeinfo);
+  }
+  tft.setTextDatum(textdatum_t::top_center);
+  tft.setTextPadding(kSideW - 2);
+  tft.setTextColor(radar::kColorLabel, bg);
+  setListFont(0.9f);
+  int y = 10;
+  tft.drawString(buf, kSideCx, y);
+  y += tft.fontHeight() + 40;
+
+  snprintf(buf, sizeof(buf), "%u", static_cast<unsigned>(services::adsb::aircraftCount()));
+  setListFont(1.4f);
+  tft.drawString(buf, kSideCx, y);
+  y += tft.fontHeight();
+  tft.setTextColor(grey, bg);
+  setListFont(0.6f);
+  tft.drawString("aircraft", kSideCx, y);
+
+  tft.setTextDatum(textdatum_t::bottom_center);
+  tft.drawString(config::kAppVersion, kSideCx, radar::kShownSize - 4);
   tft.setTextPadding(0);
 }
 
+// List columns: text at x (left edge, or right edge if right-aligned); its padding
+// [x, x + pad) or (x - pad, x] is filled with the row background so lines overwrite in place.
+struct ListCol {
+  int x;
+  int pad;
+  bool right;
+};
+// Line 1: flight | type | description | heading.  Line 2: reg | alt | speed | climb | dist+dir.
+constexpr ListCol kListLine1[] = {{3, 57, false}, {60, 38, false}, {98, 182, false}, {318, 38, true}};
+constexpr ListCol kListLine2[] = {{3, 70, false}, {125, 52, true}, {190, 65, true},
+                                  {252, 62, true}, {318, 66, true}};
+
+void drawListLine(int y, int h, uint16_t fg, uint16_t row_bg, const ListCol* cols,
+                  const char* const* texts, size_t n) {
+  tft.setTextColor(fg, row_bg);
+  tft.fillRect(0, y, 3, h, row_bg);
+  tft.fillRect(kScreenW - 2, y, 2, h, row_bg);
+  for (size_t c = 0; c < n; ++c) {
+    tft.setTextDatum(cols[c].right ? textdatum_t::top_right : textdatum_t::top_left);
+    tft.setTextPadding(cols[c].pad);
+    tft.drawString(texts[c], cols[c].x, y);
+  }
+  tft.setTextPadding(0);
+  const int text_h = tft.fontHeight();
+  if (h > text_h) {
+    tft.fillRect(0, y + text_h, kScreenW, h - text_h, row_bg);
+  }
+}
+
+// Copy text into out, cut short (no partial glyphs) so it fits max_w px in the current font.
+void fitText(const char* text, int max_w, char* out, size_t out_len) {
+  strncpy(out, text, out_len - 1);
+  out[out_len - 1] = '\0';
+  size_t len = strlen(out);
+  while (len > 0 && tft.textWidth(out) > max_w) {
+    out[--len] = '\0';
+  }
+}
+
+void drawPlaneList(uint16_t bg) {
+  struct ListItem {
+    size_t index;
+    float dist_km;
+    float bearing_deg;
+  };
+  const services::adsb::Aircraft* planes = services::adsb::aircraftList();
+  const size_t n = services::adsb::aircraftCount();
+  ListItem items[kMaxListRows];
+  size_t count = 0;
+  const services::adsb::Aircraft* selected = nullptr;
+  for (size_t i = 0; i < n && count < static_cast<size_t>(kMaxListRows); ++i) {
+    float dx_km = 0.0f;
+    float dy_km = 0.0f;
+    float dist_km = 0.0f;
+    offsetKmFromCenter(planes[i].lat, planes[i].lon, &dx_km, &dy_km, &dist_km);
+    items[count].index = i;
+    items[count].dist_km = dist_km;
+    float bearing = atan2f(dx_km, dy_km) * 180.0f / static_cast<float>(M_PI);
+    if (bearing < 0.0f) bearing += 360.0f;
+    items[count].bearing_deg = bearing;
+    ++count;
+    if (s_selected_hex[0] != '\0' && strcmp(planes[i].hex, s_selected_hex) == 0) {
+      selected = &planes[i];
+    }
+  }
+  for (size_t i = 1; i < count; ++i) {  // closest first
+    const ListItem key = items[i];
+    size_t j = i;
+    while (j > 0 && items[j - 1].dist_km > key.dist_km) {
+      items[j] = items[j - 1];
+      --j;
+    }
+    items[j] = key;
+  }
+
+  // The details block shifts every row, so clear the whole list when it comes or goes.
+  const bool has_details = selected != nullptr;
+  if (s_list_needs_clear || has_details != s_list_had_details) {
+    tft.fillRect(0, kListTop, kScreenW, kListBottom - kListTop, bg);
+    s_list_rows = 0;
+    s_list_had_details = has_details;
+    s_list_needs_clear = false;
+  }
+
+  int y = kListTop + 3;
+  if (selected) {
+    y = drawSelectedLines(selected, y, bg);
+    tft.drawFastHLine(0, y + 1, kScreenW, radar::kColorGrid);
+    y += 4;
+  }
+
+  // Each aircraft takes two lines:
+  //   flight | type | description          | heading   (icon colour)
+  //   reg    | alt  | speed | climb | distance + compass direction   (grey)
+  setListFont(0.7f);
+  const int line_h = tft.fontHeight();
+  const int row_h = 2 * line_h + 2;
+  {
+    const char* const h1[] = {"Flight", "Type", "Description", "Hdg"};
+    const char* const h2[] = {"Reg", "Alt", "Speed", "Climb", "Dist"};
+    drawListLine(y, line_h, radar::kColorGrid, bg, kListLine1, h1, 4);
+    drawListLine(y + line_h, line_h + 2, radar::kColorGrid, bg, kListLine2, h2, 5);
+  }
+  y += row_h;
+  s_list_rows_top = y;
+  s_list_row_h = row_h;
+
+  static const char* const kCompass[] = {"N", "NE", "E", "SE", "S", "SW", "W", "NW"};
+  const uint16_t highlight_bg = lgfx::color565(55, 55, 85);
+  const uint16_t line2_fg = lgfx::color565(170, 170, 170);
+  const bool miles = ui::radar::useMiles();
+  int rows = 0;
+  for (size_t k = 0; k < count && y + row_h <= kListBottom; ++k) {
+    const services::adsb::Aircraft& plane = planes[items[k].index];
+    const uint16_t fg = plane.is_heli ? radar::kColorHelicopter : aircraftAltitudeColor(plane);
+    const uint16_t row_bg = (&plane == selected) ? highlight_bg : bg;
+    const char* flight =
+        (plane.callsign[0] != '\0' && plane.callsign[0] != '~') ? plane.callsign : plane.hex;
+    char desc[sizeof(plane.desc)];
+    fitText(plane.desc[0] ? plane.desc : "-", kListLine1[2].pad - 4, desc, sizeof(desc));
+    char heading[8];
+    snprintf(heading, sizeof(heading), "%03.0f", plane.track_deg);
+    char speed[16];
+    char climb[16];
+    char dist[20];
+    const char* dir = kCompass[static_cast<int>((items[k].bearing_deg + 22.5f) / 45.0f) % 8];
+    if (miles) {
+      snprintf(speed, sizeof(speed), "%.0f mph", plane.gs_knots * 1.150779f);
+      snprintf(climb, sizeof(climb), "%+.0f fpm", plane.vrate_fpm);
+      snprintf(dist, sizeof(dist), "%.1f mi %s", items[k].dist_km / 1.60934f, dir);
+    } else {
+      snprintf(speed, sizeof(speed), "%.0f km/h", plane.gs_knots * 1.852f);
+      snprintf(climb, sizeof(climb), "%+.1f m/s", plane.vrate_fpm * 0.00508f);
+      snprintf(dist, sizeof(dist), "%.1f km %s", items[k].dist_km, dir);
+    }
+    const char* const line1[] = {flight, plane.type[0] ? plane.type : "-", desc, heading};
+    const char* const line2[] = {plane.reg[0] ? plane.reg : "-", plane.alt[0] ? plane.alt : "-",
+                                 speed, climb, dist};
+    drawListLine(y, line_h, fg, row_bg, kListLine1, line1, 4);
+    drawListLine(y + line_h, line_h + 2, line2_fg, row_bg, kListLine2, line2, 5);
+    strcpy(s_list_hex[rows], plane.hex);
+    ++rows;
+    y += row_h;
+  }
+  if (rows < s_list_rows) {  // blank rows left over from a longer list
+    const int clear_h = std::min((s_list_rows - rows) * row_h, kListBottom - y);
+    if (clear_h > 0) {
+      tft.fillRect(0, y, kScreenW, clear_h, bg);
+    }
+  }
+  s_list_rows = rows;
+}
+
+void drawListLayout(uint16_t bg) {
+  tft.drawFastHLine(0, radar::kShownSize, kScreenW, radar::kColorGrid);
+  drawSidePanel(bg);
+  drawPlaneList(bg);
+  if (s_data_stale) {
+    tft.fillRect(0, kListBottom, kScreenW, kBannerH, lgfx::color565(200, 0, 0));
+    tft.setTextColor(lgfx::color565(255, 255, 255), lgfx::color565(200, 0, 0));
+    tft.setTextDatum(textdatum_t::middle_center);
+    setListFont(0.7f);
+    tft.drawString("Connection Lost", kScreenW / 2, kScreenH - 12);
+  } else {
+    tft.fillRect(0, kListBottom, kScreenW, kBannerH, bg);
+  }
+}
+#endif  // PLANE_LIST
+
+void drawDetailsPanel() {
+  uint16_t bg = s_frame_ready ? downsampleColor(radar::kColorBackground) : radar::kColorBackground;
+#ifdef PLANE_LIST
+  drawListLayout(bg);
+  return;
+#endif
+  tft.drawFastHLine(0, radar::kShownSize, kScreenW, radar::kColorGrid);
+  drawAppVersion();
+  drawClock();
+  drawAircraftCount();
+
+  if (s_data_stale) {
+    tft.fillRect(0, kScreenH - 24, kScreenW, 24, lgfx::color565(200, 0, 0));
+    tft.setTextColor(lgfx::color565(255, 255, 255), lgfx::color565(200, 0, 0));
+    tft.setTextDatum(textdatum_t::middle_center);
+    displayFontEnsureLoaded(tft);
+    if (displayFontIsSmooth()) {
+      displayFontSetSmoothSize(tft, 0.7f);
+    } else {
+      displayFontSetBitmap(tft, &fonts::FreeSansBold9pt7b);
+    }
+    tft.drawString("Connection Lost", kScreenW / 2, kScreenH - 12);
+    // Draw on top of everything at the bottom of the screen
+  }
+
+  if (s_selected_hex[0] == '\0') {
+    tft.setTextDatum(textdatum_t::middle_center);
+    tft.setTextColor(radar::kColorLabel, bg);
+    displayFontEnsureLoaded(tft);
+    if (displayFontIsSmooth()) {
+      displayFontSetSmoothSize(tft, 1.2f);
+    } else {
+      displayFontSetBitmap(tft, &fonts::FreeSansBold12pt7b);
+    }
+    tft.setTextPadding(kScreenW);
+    tft.drawString("CYD Flight Radar", kScreenW / 2, radar::kShownSize + (kScreenH - radar::kShownSize) / 2);
+    tft.setTextPadding(0);
+    // Clear the rest of the lines
+    tft.fillRect(0, radar::kShownSize + 4, kScreenW, (kScreenH - radar::kShownSize) / 2 - 12, bg);
+    tft.fillRect(0, radar::kShownSize + (kScreenH - radar::kShownSize) / 2 + 12, kScreenW, (kScreenH - radar::kShownSize) / 2 - 24, bg);
+    return;
+  }
+  
+  const services::adsb::Aircraft* planes = services::adsb::aircraftList();
+  const size_t n = services::adsb::aircraftCount();
+  const services::adsb::Aircraft* ac = nullptr;
+  for (size_t i = 0; i < n; ++i) {
+    if (strcmp(planes[i].hex, s_selected_hex) == 0) {
+      ac = &planes[i];
+      break;
+    }
+  }
+  
+  if (!ac) {
+    return; // Selected aircraft disappeared
+  }
+  
+  drawSelectedLines(ac, radar::kShownSize + 4, bg);
+}
+
+}  // namespace
+
+namespace {
+// Touch arrives in screen pixels; aircraft and labels live in frame-sprite pixels.
+void screenToFrame(int* x, int* y) {
+  *x = *x * radar::kSize / radar::kShownSize;
+  *y = *y * radar::kSize / radar::kShownSize;
+}
 }  // namespace
 
 void radarDisplaySetStale(bool is_stale) {
@@ -1084,6 +1382,27 @@ void radarDisplaySetStale(bool is_stale) {
 }
 
 bool radarDisplayHandleTouch(int x, int y) {
+#ifdef PLANE_LIST
+  if (y >= kListTop) {  // list area: a row selects (or deselects) that aircraft
+    if (y >= s_list_rows_top && s_list_row_h > 0) {
+      const int row = (y - s_list_rows_top) / s_list_row_h;
+      if (row < s_list_rows) {
+        if (strcmp(s_selected_hex, s_list_hex[row]) == 0) {
+          s_selected_hex[0] = '\0';
+        } else {
+          strcpy(s_selected_hex, s_list_hex[row]);
+        }
+        return true;
+      }
+    }
+    if (s_selected_hex[0] != '\0') {
+      s_selected_hex[0] = '\0';
+      return true;
+    }
+    return false;
+  }
+#endif
+  screenToFrame(&x, &y);
   bool changed = false;
   if (y >= radar::kSize) {
     if (s_selected_hex[0] != '\0') {
@@ -1131,6 +1450,7 @@ bool radarDisplayHandleTouch(int x, int y) {
 }
 
 bool radarDisplayIsScaleTapped(int x, int y) {
+  screenToFrame(&x, &y);
   if (y >= radar::kSize) return false;
   
   // Generous corner hit box around the bottom-right-anchored label, limited to
@@ -1148,6 +1468,9 @@ void radarDisplayDraw() {
   // Clear the full screen once to erase any previous status screens
   tft.fillRect(0, 0, config::kDisplayWidth, config::kDisplayHeight,
                radar::kColorBackground);
+#ifdef PLANE_LIST
+  s_list_needs_clear = true;
+#endif
 
   if (ensureFrameSprite()) {
     renderFrame();

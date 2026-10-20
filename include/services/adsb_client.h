@@ -4,8 +4,12 @@
 
 namespace services::adsb {
 
-/** Points kept per aircraft for the flight-path trail (was 6). */
+/** Points kept per aircraft for the flight-path trail (was 6; TRAIL_LENGTH build flag overrides). */
+#ifdef TRAIL_LENGTH
+constexpr size_t kTrailLength = TRAIL_LENGTH;
+#else
 constexpr size_t kTrailLength = 18;
+#endif
 
 struct Aircraft {
   char hex[7];
@@ -38,7 +42,11 @@ struct Aircraft {
   size_t trail_head;
 };
 
+#ifdef MAX_AIRCRAFT
+constexpr size_t kMaxAircraft = MAX_AIRCRAFT;
+#else
 constexpr size_t kMaxAircraft = 40;
+#endif
 
 size_t aircraftCount();
 const Aircraft* aircraftList();
