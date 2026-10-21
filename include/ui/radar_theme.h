@@ -50,6 +50,9 @@ constexpr int kCenterDotRadius = 2;
 constexpr int kAircraftNoseLenPx = 8;
 constexpr int kAircraftTailLenPx = 3;
 constexpr int kAircraftTailHalfPx = 4;
+/** Dot in the middle of the icon at or above this altitude. */
+constexpr float kCruiseDotAltitudeFt = 25000.0f;
+constexpr int kCruiseDotRadiusPx = 2;
 /** Track vector: ground distance covered in this many seconds at current gs. */
 constexpr float kAircraftTrackHorizonSec = 60.0f;
 /** Minimum visible vector when gs > 0 (px). */
@@ -135,6 +138,7 @@ constexpr float kLevelFlightFpm = 200.0f;
 extern uint16_t kColorAltHigh;     // >= kHighAltitudeFt
 extern uint16_t kColorAltClimb;    // below, climbing
 extern uint16_t kColorAltDescend;  // below, descending
+extern uint16_t kColorCruiseDot;   // dot in the icon >= kCruiseDotAltitudeFt
 extern uint16_t kColorAltLevel;    // below, level / on ground / unknown
 
 }  // namespace ui::radar

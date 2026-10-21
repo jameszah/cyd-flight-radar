@@ -135,6 +135,15 @@ static void my_touchpad_read(lv_indev_drv_t *indev_driver, lv_indev_data_t *data
     }
     uint16_t tx = 0, ty = 0;
     bool touched = tft.getTouch(&tx, &ty);
+#ifdef TOUCH_DEBUG
+    static bool s_was_touched = false;
+    if (touched && !s_was_touched) {
+        lgfx::touch_point_t raw;
+        tft.getTouchRaw(&raw, 1);
+        Serial.printf("settings touch: x=%u y=%u (raw %d,%d)\n", tx, ty, raw.x, raw.y);
+    }
+    s_was_touched = touched;
+#endif
     if (touched) {
         data->state = LV_INDEV_STATE_PR;
         data->point.x = tx;
@@ -267,6 +276,12 @@ static lv_obj_t* create_slider_row(lv_obj_t * parent, const char * text, int min
     return row;
 }
 
+// < / > buttons on the stepper rows. Taps for "<" landed ~10px right of the old
+// 35px button, so the buttons are wider and also accept taps just outside.
+static constexpr lv_coord_t kArrowBtnW = 50;
+static constexpr lv_coord_t kArrowBtnH = 30;
+static constexpr lv_coord_t kArrowBtnExtClickPx = 12;
+
 struct TimezonePreset {
     const char* label;
     const char* value;
@@ -349,7 +364,8 @@ static lv_obj_t* create_screensaver_row(lv_obj_t * parent) {
     lv_obj_set_flex_align(controls, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
     lv_obj_t * btn_minus = lv_btn_create(controls);
-    lv_obj_set_size(btn_minus, 35, 30);
+    lv_obj_set_size(btn_minus, kArrowBtnW, kArrowBtnH);
+    lv_obj_set_ext_click_area(btn_minus, kArrowBtnExtClickPx);
     lv_obj_add_event_cb(btn_minus, ss_btn_event_cb, LV_EVENT_CLICKED, (void*)(intptr_t)-1);
     lv_obj_set_style_bg_color(btn_minus, get_lv_color(getCatppuccinFlavor(s_theme_flavor).overlay), 0);
     lv_obj_t * lbl_minus = lv_label_create(btn_minus);
@@ -363,7 +379,8 @@ static lv_obj_t* create_screensaver_row(lv_obj_t * parent) {
     lv_obj_set_style_text_align(ss_val_label, LV_TEXT_ALIGN_CENTER, 0);
 
     lv_obj_t * btn_plus = lv_btn_create(controls);
-    lv_obj_set_size(btn_plus, 35, 30);
+    lv_obj_set_size(btn_plus, kArrowBtnW, kArrowBtnH);
+    lv_obj_set_ext_click_area(btn_plus, kArrowBtnExtClickPx);
     lv_obj_add_event_cb(btn_plus, ss_btn_event_cb, LV_EVENT_CLICKED, (void*)(intptr_t)1);
     lv_obj_set_style_bg_color(btn_plus, get_lv_color(getCatppuccinFlavor(s_theme_flavor).overlay), 0);
     lv_obj_t * lbl_plus = lv_label_create(btn_plus);
@@ -417,7 +434,8 @@ static lv_obj_t* create_range_row(lv_obj_t * parent) {
     lv_obj_set_flex_align(controls, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
     lv_obj_t * btn_minus = lv_btn_create(controls);
-    lv_obj_set_size(btn_minus, 35, 30);
+    lv_obj_set_size(btn_minus, kArrowBtnW, kArrowBtnH);
+    lv_obj_set_ext_click_area(btn_minus, kArrowBtnExtClickPx);
     lv_obj_add_event_cb(btn_minus, range_btn_event_cb, LV_EVENT_CLICKED, (void*)(intptr_t)-1);
     lv_obj_set_style_bg_color(btn_minus, get_lv_color(getCatppuccinFlavor(s_theme_flavor).overlay), 0);
     lv_obj_t * lbl_minus = lv_label_create(btn_minus);
@@ -431,7 +449,8 @@ static lv_obj_t* create_range_row(lv_obj_t * parent) {
     lv_obj_set_style_text_align(range_val_label, LV_TEXT_ALIGN_CENTER, 0);
 
     lv_obj_t * btn_plus = lv_btn_create(controls);
-    lv_obj_set_size(btn_plus, 35, 30);
+    lv_obj_set_size(btn_plus, kArrowBtnW, kArrowBtnH);
+    lv_obj_set_ext_click_area(btn_plus, kArrowBtnExtClickPx);
     lv_obj_add_event_cb(btn_plus, range_btn_event_cb, LV_EVENT_CLICKED, (void*)(intptr_t)1);
     lv_obj_set_style_bg_color(btn_plus, get_lv_color(getCatppuccinFlavor(s_theme_flavor).overlay), 0);
     lv_obj_t * lbl_plus = lv_label_create(btn_plus);
@@ -483,7 +502,8 @@ static lv_obj_t* create_theme_row(lv_obj_t * parent) {
     lv_obj_set_flex_align(controls, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
     lv_obj_t * btn_minus = lv_btn_create(controls);
-    lv_obj_set_size(btn_minus, 35, 30);
+    lv_obj_set_size(btn_minus, kArrowBtnW, kArrowBtnH);
+    lv_obj_set_ext_click_area(btn_minus, kArrowBtnExtClickPx);
     lv_obj_add_event_cb(btn_minus, theme_btn_event_cb, LV_EVENT_CLICKED, (void*)(intptr_t)-1);
     lv_obj_set_style_bg_color(btn_minus, get_lv_color(getCatppuccinFlavor(s_theme_flavor).overlay), 0);
     lv_obj_t * lbl_minus = lv_label_create(btn_minus);
@@ -497,7 +517,8 @@ static lv_obj_t* create_theme_row(lv_obj_t * parent) {
     lv_obj_set_style_text_align(theme_val_label, LV_TEXT_ALIGN_CENTER, 0);
 
     lv_obj_t * btn_plus = lv_btn_create(controls);
-    lv_obj_set_size(btn_plus, 35, 30);
+    lv_obj_set_size(btn_plus, kArrowBtnW, kArrowBtnH);
+    lv_obj_set_ext_click_area(btn_plus, kArrowBtnExtClickPx);
     lv_obj_add_event_cb(btn_plus, theme_btn_event_cb, LV_EVENT_CLICKED, (void*)(intptr_t)1);
     lv_obj_set_style_bg_color(btn_plus, get_lv_color(getCatppuccinFlavor(s_theme_flavor).overlay), 0);
     lv_obj_t * lbl_plus = lv_label_create(btn_plus);
@@ -531,7 +552,8 @@ static lv_obj_t* create_timezone_row(lv_obj_t * parent) {
     lv_obj_set_flex_align(controls, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
     lv_obj_t * btn_minus = lv_btn_create(controls);
-    lv_obj_set_size(btn_minus, 35, 30);
+    lv_obj_set_size(btn_minus, kArrowBtnW, kArrowBtnH);
+    lv_obj_set_ext_click_area(btn_minus, kArrowBtnExtClickPx);
     lv_obj_add_event_cb(btn_minus, tz_btn_event_cb, LV_EVENT_CLICKED, (void*)(intptr_t)-1);
     lv_obj_set_style_bg_color(btn_minus, get_lv_color(getCatppuccinFlavor(s_theme_flavor).overlay), 0);
     lv_obj_t * lbl_minus = lv_label_create(btn_minus);
@@ -545,7 +567,8 @@ static lv_obj_t* create_timezone_row(lv_obj_t * parent) {
     lv_obj_set_style_text_align(tz_val_label, LV_TEXT_ALIGN_CENTER, 0);
 
     lv_obj_t * btn_plus = lv_btn_create(controls);
-    lv_obj_set_size(btn_plus, 35, 30);
+    lv_obj_set_size(btn_plus, kArrowBtnW, kArrowBtnH);
+    lv_obj_set_ext_click_area(btn_plus, kArrowBtnExtClickPx);
     lv_obj_add_event_cb(btn_plus, tz_btn_event_cb, LV_EVENT_CLICKED, (void*)(intptr_t)1);
     lv_obj_set_style_bg_color(btn_plus, get_lv_color(getCatppuccinFlavor(s_theme_flavor).overlay), 0);
     lv_obj_t * lbl_plus = lv_label_create(btn_plus);

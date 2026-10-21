@@ -52,6 +52,7 @@ uint16_t kColorAltHigh = hex2rgb565(0xFFFFFF);
 uint16_t kColorAltClimb = hex2rgb565(0x00FF00);
 uint16_t kColorAltDescend = hex2rgb565(0xFF0000);
 uint16_t kColorAltLevel = hex2rgb565(0xFFFF00);
+uint16_t kColorCruiseDot = hex2rgb565(0xFF0000);
 
 }  // namespace radar
 
@@ -73,6 +74,7 @@ void updateThemeColors() {
     radar::kColorAltClimb = radar::hex2rgb565(0x00FF00);
     radar::kColorAltDescend = radar::hex2rgb565(0xFF0000);
     radar::kColorAltLevel = radar::hex2rgb565(0xFFFF00);
+    radar::kColorCruiseDot = radar::hex2rgb565(0xFF0000);
 }
 
 namespace {
@@ -347,7 +349,12 @@ void noseTip(int cx, int cy, float heading_deg, int* tip_x, int* tip_y) {
   *tip_y = cy - static_cast<int>(lroundf(cosf(rad) * radar::kAircraftNoseLenPx));
 }
 
-void drawHeadingTriangle(int cx, int cy, float heading_deg, uint16_t color) {
+bool isCruiseAltitude(const services::adsb::Aircraft& plane) {
+  return !isnan(plane.alt_ft) && plane.alt_ft >= radar::kCruiseDotAltitudeFt;
+}
+
+void drawHeadingTriangle(int cx, int cy, float heading_deg, uint16_t color,
+                         bool cruise_dot = false) {
   constexpr float kDegToRad = 0.01745329252f;
   const float rad = heading_deg * kDegToRad;
   const float sin_h = sinf(rad);
@@ -367,6 +374,13 @@ void drawHeadingTriangle(int cx, int cy, float heading_deg, uint16_t color) {
 
   s_draw->fillTriangle(tip_x, tip_y, base_x + wing_x, base_y + wing_y,
                        base_x - wing_x, base_y - wing_y, color);
+
+  if (cruise_dot) {
+    // Centroid of the triangle (the two base corners average to base_x/y).
+    const int dot_x = (tip_x + 2 * base_x) / 3;
+    const int dot_y = (tip_y + 2 * base_y) / 3;
+    s_draw->fillCircle(dot_x, dot_y, radar::kCruiseDotRadiusPx, radar::kColorCruiseDot);
+  }
 }
 
 void drawHelicopterSymbol(int cx, int cy, float heading_deg, uint16_t color) {
@@ -596,7 +610,8 @@ void drawAircraft() {
     if (planes[i].is_heli) {
       drawHelicopterSymbol(x, y, planes[i].nose_deg, radar::kColorHelicopter);
     } else {
-      drawHeadingTriangle(x, y, planes[i].nose_deg, aircraftAltitudeColor(planes[i]));
+      drawHeadingTriangle(x, y, planes[i].nose_deg, aircraftAltitudeColor(planes[i]),
+                          isCruiseAltitude(planes[i]));
     }
   }
   for (size_t d = 0; d < draw_count; ++d) {

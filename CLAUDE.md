@@ -1,12 +1,17 @@
-# Project notes: CYD flight radar on Freenove FNK0104B
+# Project notes: CYD flight radar on Freenove FNK0104B and FNK0103N
 
 Fork of nicholaswilde/cyd-flight-radar, ported to the owner's **Freenove FNK0104B**
-(ESP32-S3, 2.8" ILI9341 240x320, FT6336 capacitive touch, native USB-C).
-Built and flashed from VS Code + PlatformIO on Windows. `fnk0104b` is the default env.
+(ESP32-S3, 2.8" ILI9341 240x320, FT6336 capacitive touch, native USB-C) and **FNK0103N**
+(see its section below). Both live on `main` as separate envs (the `FNK0103N` branch was merged in).
+Built and flashed from VS Code + PlatformIO on Windows. `fnk0104b` is the default env; pick the
+board with the env switcher in the VS Code status bar or `-e`.
 
 ## Build / flash
 - `pio run -e fnk0104b` (build), `pio run -e fnk0104b -t upload`, `pio device monitor -e fnk0104b`
+- Same with `-e fnk0103n` for the FNK0103N (pinned to COM10; fnk0104b auto-detects its port).
 - Native USB: if upload can't connect, hold BOOT, tap RST, release BOOT, retry.
+- `pio run` sometimes fails first time with `No module named 'SCons.Tool.FortranCommon'` (PlatformIO
+  tool update racing the VS Code extension); just rerun.
 - `config/secrets.h` exists with blank SSID/password on purpose (gitignored): the board
   opens the `cyd-flight-radar-XXXX` captive portal for Wi-Fi and location.
 
@@ -57,8 +62,9 @@ Built and flashed from VS Code + PlatformIO on Windows. `fnk0104b` is the defaul
   `setup()`); it was never persisted, so it reset to UTC every boot. `airports`, `med_airports`, `auto_dim`
   were saved but never loaded; `setup()` now reads them back too.
 
-## Branch `FNK0103N`: Freenove FNK0103N port (ESP32 classic, 3.5" ST7796 320x480, XPT2046 resistive)
-- `[env:fnk0103n]` (extends `cyd_base`, esp32dev) is the default env on this branch; `fnk0104b` still builds.
+## FNK0103N port (ESP32 classic, 3.5" ST7796 320x480, XPT2046 resistive)
+- `[env:fnk0103n]` (extends `cyd_base`, esp32dev). Shared code is guarded by `BOARD_FNK0103N` /
+  `PLANE_LIST` etc., so changes for one board must keep the other env building.
 - Pins from Freenove's FNK0114N TFT_eSPI setup: same as `cyd_35c` (MOSI 13, MISO 12, SCLK 14, CS 15,
   DC 2, BL 27). Touch is an XPT2046 on the LCD's SPI bus, CS 33 (`XPT2046_SHARED_CS`, `bus_shared`, no IRQ).
 - `radar::kSize` = `RADAR_SIZE` / `TFT_WIDTH` / 240; `kGridOuterRadius` scales with it (107 @ 240).
@@ -83,7 +89,8 @@ Built and flashed from VS Code + PlatformIO on Windows. `fnk0104b` is the defaul
 - Not verified: touch calibration (raw 300..3900, y reversed: a guess), colours, whether the
   100 KB 320x320 sprite plus TLS fit in heap (fallback: `RADAR_SIZE=240`).
 
-- Screensaver (`src/ui/screensaver.cpp`): matrix rain (from a pasted blocking sketch, made non-blocking:
+## Screensaver (both boards)
+- `src/ui/screensaver.cpp`: matrix rain (from a pasted blocking sketch, made non-blocking:
   `begin/tick/end`, ticked from `loop()` every `kScreensaverFrameMs` (50), straight to `tft`).
   Reworked to look like the film: one stream per 7x12 column, halfwidth katakana (U+FF66-FF9D) + digits
   from `fonts::lgfxJapanGothic_12` (+~110 KB flash), 8-shade fade (pale head -> dark green), trails
