@@ -48,7 +48,52 @@ static void configureStaticIP() {
 }
 
 WifiManager::WifiManager(const char* ssid, const char* password)
-    : _ssid(ssid), _password(password), _state(WIFI_STATE_DISCONNECTED), _lastReconnectAttempt(0), _connectionStartTime(0) {}
+    : _defaultSsid(ssid), _defaultPassword(password), _state(WIFI_STATE_DISCONNECTED), _lastReconnectAttempt(0), _connectionStartTime(0) {}
+
+void WifiManager::loadCredentials() {
+    Preferences preferences;
+    preferences.begin("wifi", true);
+    _ssids[0] = preferences.getString("ssid", "");
+    _passwords[0] = preferences.getString("pass", "");
+    // isKey() first: getString() on a missing key logs an NVS error.
+    _ssids[1] = preferences.isKey("ssid2") ? preferences.getString("ssid2", "") : String();
+    _passwords[1] = preferences.isKey("pass2") ? preferences.getString("pass2", "") : String();
+    preferences.end();
+
+    if (_ssids[0].length() == 0) {
+        _ssids[0] = _defaultSsid;
+        _passwords[0] = _defaultPassword;
+    }
+}
+
+void WifiManager::connectTo(int idx) {
+    _netIdx = idx;
+    _netsTried++;
+    WiFi.disconnect();
+    configureStaticIP();
+    WiFi.begin(_ssids[idx].c_str(), _passwords[idx].c_str());
+    _state = WIFI_STATE_CONNECTING;
+    _connectionStartTime = millis();
+    Serial.printf("[WiFi] Connecting to %s (network %d)...\n", _ssids[idx].c_str(), idx + 1);
+}
+
+// Starts with the network that last worked (or was last tried), then the other one.
+void WifiManager::startConnectCycle() {
+    _netsTried = 0;
+    if (_ssids[_netIdx].length() == 0) {
+        _netIdx = (_netIdx + 1) % kNetworkCount;
+    }
+    connectTo(_netIdx);
+}
+
+bool WifiManager::tryOtherNetwork() {
+    if (_netsTried >= kNetworkCount) return false;
+    const int other = (_netIdx + 1) % kNetworkCount;
+    if (_ssids[other].length() == 0) return false;
+    Serial.printf("[WiFi] %s failed, trying %s...\n", _ssids[_netIdx].c_str(), _ssids[other].c_str());
+    connectTo(other);
+    return true;
+}
 
 void WifiManager::begin() {
     Serial.println("[WiFi] Starting Wi-Fi Manager...");
@@ -89,28 +134,13 @@ void WifiManager::begin() {
     });
 #endif
     WiFi.mode(WIFI_STA);
-    
-    Preferences preferences;
-    preferences.begin("wifi", true);
-    String saved_ssid = preferences.getString("ssid", "");
-    String saved_pass = preferences.getString("pass", "");
-    preferences.end();
-    
-    if (saved_ssid.length() > 0) {
-        _ssid = saved_ssid;
-        _password = saved_pass;
-    }
 
-    
-    if (_ssid.length() == 0) {
+    loadCredentials();
+    if (_ssids[0].length() == 0 && _ssids[1].length() == 0) {
         Serial.println("[WiFi] No credentials configured. Launching AP mode directly...");
         startAPMode();
     } else {
-        configureStaticIP();
-        WiFi.begin(_ssid.c_str(), _password.c_str());
-        _state = WIFI_STATE_CONNECTING;
-        _connectionStartTime = millis();
-        Serial.printf("[WiFi] Connecting to %s...\n", _ssid.c_str());
+        startConnectCycle();
     }
 }
 
@@ -127,10 +157,12 @@ void WifiManager::update() {
             if (millis() - _lastReconnectAttempt > _reconnectInterval) {
                 _lastReconnectAttempt = millis();
                 Serial.println("[WiFi] Reconnecting...");
-                configureStaticIP();
-                WiFi.begin(_ssid.c_str(), _password.c_str());
-                _state = WIFI_STATE_CONNECTING;
-                _connectionStartTime = millis();
+                loadCredentials();  // picks up networks edited in the settings menu
+                if (_ssids[0].length() == 0 && _ssids[1].length() == 0) {
+                    startAPMode();
+                } else {
+                    startConnectCycle();
+                }
             }
             break;
 
@@ -142,9 +174,13 @@ void WifiManager::update() {
 #ifndef NATIVE_TEST
                 
 #endif
-            } else if (status == WL_CONNECT_FAILED || status == WL_NO_SSID_AVAIL || (millis() - _connectionStartTime > _connectionTimeout)) {
-                Serial.println("[WiFi] Connection failed or timed out. Transitioning to AP Mode...");
-                startAPMode();
+            } else if (((status == WL_CONNECT_FAILED || status == WL_NO_SSID_AVAIL) &&
+                        millis() - _connectionStartTime > _failStatusGraceMs) ||
+                       (millis() - _connectionStartTime > _connectionTimeout)) {
+                if (!tryOtherNetwork()) {
+                    Serial.println("[WiFi] Connection failed or timed out. Transitioning to AP Mode...");
+                    startAPMode();
+                }
             }
             break;
 
@@ -217,8 +253,12 @@ int8_t WifiManager::getRSSI() const {
 }
 
 void WifiManager::setCredentials(const String& ssid, const String& password) {
-    _ssid = ssid;
-    _password = password;
+    _ssids[0] = ssid;
+    _passwords[0] = password;
+}
+
+String WifiManager::getSSID() const {
+    return _ssids[_netIdx];
 }
 
 String WifiManager::getAPSSID() {

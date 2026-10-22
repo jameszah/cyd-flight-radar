@@ -8,6 +8,8 @@
 #include "config.h"
 #include <Preferences.h>
 #include "services/adsb_client.h"
+#include "services/radar_location.h"
+#include "secrets.h"
 #include <WiFi.h>
 
 extern LGFX tft;
@@ -578,6 +580,186 @@ static lv_obj_t* create_timezone_row(lv_obj_t * parent) {
     return row;
 }
 
+// Text rows edited with an on-screen keyboard. Lat/lon go to services::location (the radar
+// re-centres on the next fetch); Wi-Fi credentials go to the "wifi" prefs read by WifiManager,
+// which uses them on its next connect attempt (reboot, or after the connection drops).
+enum EditField { kFieldLat, kFieldLon, kFieldSsid1, kFieldPass1, kFieldSsid2, kFieldPass2, kFieldCount };
+struct EditFieldInfo {
+    const char* title;
+    const char* wifi_key;  // nullptr for lat/lon
+    bool numeric;
+};
+static const EditFieldInfo kEditFields[kFieldCount] = {
+    {"Latitude", nullptr, true},
+    {"Longitude", nullptr, true},
+    {"WiFi 1 SSID", "ssid", false},
+    {"WiFi 1 Pass", "pass", false},
+    {"WiFi 2 SSID", "ssid2", false},
+    {"WiFi 2 Pass", "pass2", false},
+};
+static lv_obj_t * s_field_val_labels[kFieldCount] = {};
+static lv_obj_t * s_editor = nullptr;
+static lv_obj_t * s_editor_title = nullptr;
+static lv_obj_t * s_editor_ta = nullptr;
+static int s_edit_field = -1;
+
+static String read_field(int field) {
+    if (field == kFieldLat) return String(services::location::lat(), 4);
+    if (field == kFieldLon) return String(services::location::lon(), 4);
+    Preferences wifi_prefs;
+    wifi_prefs.begin("wifi", true);
+    // isKey() first: getString() on a missing key logs an NVS error.
+    const char* key = kEditFields[field].wifi_key;
+    String value = wifi_prefs.isKey(key) ? wifi_prefs.getString(key, "") : String();
+    const bool ssid1_saved = wifi_prefs.isKey("ssid") && wifi_prefs.getString("ssid", "").length() > 0;
+    wifi_prefs.end();
+    // WifiManager falls back to the compiled-in network when no SSID 1 is saved.
+    if (!ssid1_saved && field == kFieldSsid1) value = WIFI_SSID;
+    if (!ssid1_saved && field == kFieldPass1) value = WIFI_PASSWORD;
+    return value;
+}
+
+static bool write_field(int field, const char* text) {
+    if (field == kFieldLat) {
+        return services::location::saveFromStrings(text, String(services::location::lon(), 6).c_str());
+    }
+    if (field == kFieldLon) {
+        return services::location::saveFromStrings(String(services::location::lat(), 6).c_str(), text);
+    }
+    Preferences wifi_prefs;
+    wifi_prefs.begin("wifi", false);
+    wifi_prefs.putString(kEditFields[field].wifi_key, text);
+    wifi_prefs.end();
+    return true;
+}
+
+static void update_field_label(int field) {
+    if (s_field_val_labels[field] == nullptr) return;
+    const String value = read_field(field);
+    lv_label_set_text(s_field_val_labels[field], value.length() > 0 ? value.c_str() : "-");
+}
+
+static void close_editor() {
+    if (s_editor != nullptr) {
+        lv_obj_del_async(s_editor);  // called from the keyboard's own event
+        s_editor = nullptr;
+        s_editor_title = nullptr;
+        s_editor_ta = nullptr;
+    }
+    s_edit_field = -1;
+}
+
+static void editor_save() {
+    if (s_edit_field < 0 || s_editor_ta == nullptr) return;
+    if (!write_field(s_edit_field, lv_textarea_get_text(s_editor_ta))) {
+        lv_label_set_text_fmt(s_editor_title, "Invalid %s", kEditFields[s_edit_field].title);
+        lv_obj_set_style_text_color(s_editor_title, get_lv_color(getCatppuccinFlavor(s_theme_flavor).red), 0);
+        return;
+    }
+    if (s_edit_field == kFieldLat || s_edit_field == kFieldLon) {
+        update_field_label(kFieldLat);
+        update_field_label(kFieldLon);
+    } else {
+        update_field_label(s_edit_field);
+    }
+    close_editor();
+}
+
+// The keyboard's OK / keyboard keys only fire on release (CLICK_TRIG) and did nothing on the
+// FNK0104B, so the editor also has real Save / Cancel buttons; all of these end up here.
+static void editor_kb_event_cb(lv_event_t * e) {
+    const lv_event_code_t code = lv_event_get_code(e);
+    if (code == LV_EVENT_CANCEL) {
+        close_editor();
+    } else if (code == LV_EVENT_READY) {
+        editor_save();
+    }
+}
+
+static void editor_save_btn_cb(lv_event_t * e) { editor_save(); }
+static void editor_cancel_btn_cb(lv_event_t * e) { close_editor(); }
+
+static lv_obj_t * create_editor_btn(const char * text, lv_coord_t x_ofs, uint32_t bg, lv_event_cb_t cb) {
+    lv_obj_t * btn = lv_btn_create(s_editor);
+    lv_obj_set_size(btn, 90, 32);
+    lv_obj_align_to(btn, s_editor_ta, LV_ALIGN_OUT_BOTTOM_MID, x_ofs, 10);
+    lv_obj_set_ext_click_area(btn, kArrowBtnExtClickPx);
+    lv_obj_set_style_bg_color(btn, get_lv_color(bg), 0);
+    lv_obj_add_event_cb(btn, cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t * lbl = lv_label_create(btn);
+    lv_label_set_text(lbl, text);
+    lv_obj_set_style_text_color(lbl, get_lv_color(getCatppuccinFlavor(s_theme_flavor).crust), 0);
+    lv_obj_center(lbl);
+    return btn;
+}
+
+static void open_editor(int field) {
+    if (s_editor != nullptr) return;
+    s_edit_field = field;
+
+    s_editor = lv_obj_create(lv_scr_act());
+    lv_obj_set_size(s_editor, LV_PCT(100), LV_PCT(100));
+    lv_obj_align(s_editor, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_set_style_bg_color(s_editor, get_lv_color(getCatppuccinFlavor(s_theme_flavor).base), 0);
+    lv_obj_set_style_border_width(s_editor, 0, 0);
+    lv_obj_set_style_radius(s_editor, 0, 0);
+    lv_obj_set_style_pad_all(s_editor, 5, 0);
+    lv_obj_clear_flag(s_editor, LV_OBJ_FLAG_SCROLLABLE);
+
+    s_editor_title = lv_label_create(s_editor);
+    lv_label_set_text(s_editor_title, kEditFields[field].title);
+    lv_obj_set_style_text_color(s_editor_title, get_lv_color(getCatppuccinFlavor(s_theme_flavor).text), 0);
+    lv_obj_align(s_editor_title, LV_ALIGN_TOP_MID, 0, 10);
+
+    s_editor_ta = lv_textarea_create(s_editor);
+    lv_textarea_set_one_line(s_editor_ta, true);
+    lv_textarea_set_max_length(s_editor_ta, 63);
+    lv_textarea_set_text(s_editor_ta, read_field(field).c_str());
+    lv_obj_set_width(s_editor_ta, LV_PCT(100));
+    lv_obj_align(s_editor_ta, LV_ALIGN_TOP_MID, 0, 35);
+    lv_obj_add_state(s_editor_ta, LV_STATE_FOCUSED);  // show the cursor
+
+    lv_obj_t * kb = lv_keyboard_create(s_editor);
+    lv_keyboard_set_textarea(kb, s_editor_ta);
+    if (kEditFields[field].numeric) {
+        lv_keyboard_set_mode(kb, LV_KEYBOARD_MODE_NUMBER);
+    }
+    lv_obj_add_event_cb(kb, editor_kb_event_cb, LV_EVENT_ALL, NULL);
+    lv_obj_add_event_cb(s_editor_ta, editor_kb_event_cb, LV_EVENT_READY, NULL);  // Enter key
+
+    create_editor_btn("Cancel", -55, getCatppuccinFlavor(s_theme_flavor).overlay, editor_cancel_btn_cb);
+    create_editor_btn("Save", 55, getCatppuccinFlavor(s_theme_flavor).blue, editor_save_btn_cb);
+}
+
+static void edit_row_event_cb(lv_event_t * e) {
+    open_editor((int)(intptr_t)lv_event_get_user_data(e));
+}
+
+static void create_edit_row(lv_obj_t * parent, int field) {
+    lv_obj_t * row = lv_obj_create(parent);
+    lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_size(row, LV_PCT(100), 40);
+    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_bg_color(row, get_lv_color(getCatppuccinFlavor(s_theme_flavor).mantle), 0);
+    lv_obj_set_style_border_width(row, 0, 0);
+    lv_obj_set_style_pad_all(row, 10, 0);
+    lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(row, edit_row_event_cb, LV_EVENT_CLICKED, (void*)(intptr_t)field);
+
+    lv_obj_t * lbl = lv_label_create(row);
+    lv_label_set_text(lbl, kEditFields[field].title);
+    lv_obj_set_style_text_color(lbl, get_lv_color(getCatppuccinFlavor(s_theme_flavor).text), 0);
+
+    lv_obj_t * val = lv_label_create(row);
+    lv_label_set_long_mode(val, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(val, LV_PCT(50));
+    lv_obj_set_style_text_align(val, LV_TEXT_ALIGN_RIGHT, 0);
+    lv_obj_set_style_text_color(val, get_lv_color(getCatppuccinFlavor(s_theme_flavor).blue), 0);
+    s_field_val_labels[field] = val;
+    update_field_label(field);
+}
+
 static void build_ui() {
     settings_screen = lv_obj_create(NULL);
     if (!settings_screen) return;
@@ -632,7 +814,10 @@ static void build_ui() {
     create_screensaver_row(list);
     create_range_row(list);
     create_theme_row(list);
-    
+    for (int field = 0; field < kFieldCount; ++field) {
+        create_edit_row(list, field);
+    }
+
     // Close button
     lv_obj_t * close_btn = lv_btn_create(settings_screen);
     lv_obj_set_size(close_btn, 100, 30);
@@ -735,8 +920,15 @@ void hide() {
     if (s_default_screen) {
         lv_scr_load(s_default_screen);
     }
-    lv_obj_del(settings_screen);
+    lv_obj_del(settings_screen);  // also deletes an open editor
     settings_screen = nullptr;
+    s_editor = nullptr;
+    s_editor_title = nullptr;
+    s_editor_ta = nullptr;
+    s_edit_field = -1;
+    for (int field = 0; field < kFieldCount; ++field) {
+        s_field_val_labels[field] = nullptr;
+    }
     
     // We clear the screen completely so LovyanGFX can draw the radar over it again
     const CatppuccinColors& flavor = getCatppuccinFlavor(s_theme_flavor);

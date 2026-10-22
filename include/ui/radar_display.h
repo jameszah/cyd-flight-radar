@@ -13,5 +13,6 @@ void updateThemeColors();
 
 bool radarDisplayHandleTouch(int x, int y);
 bool radarDisplayIsScaleTapped(int x, int y);
+bool radarDisplayIsTitleTapped(int x, int y);  // "Flight Radar" / "CYD" corner
 
 }  // namespace ui

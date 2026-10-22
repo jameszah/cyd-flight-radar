@@ -1476,6 +1476,17 @@ bool radarDisplayIsScaleTapped(int x, int y) {
   return distSqFromCenter(x, y) > radar::kGridOuterRadius * radar::kGridOuterRadius;
 }
 
+bool radarDisplayIsTitleTapped(int x, int y) {
+  screenToFrame(&x, &y);
+  if (y >= radar::kSize) return false;
+
+  // Hit box around "Flight Radar" / "CYD" (drawTitle), outside the outer ring like the scale tap.
+  const int min_x = radar::kSize - 75;
+  const int max_y = 2 + kLegendRowPx + 20;
+  if (x < min_x || y > max_y) return false;
+  return distSqFromCenter(x, y) > radar::kGridOuterRadius * radar::kGridOuterRadius;
+}
+
 void radarDisplayDraw() {
   initPalette();
   initLabelMetrics();

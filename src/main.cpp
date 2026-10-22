@@ -29,6 +29,7 @@ unsigned long g_last_activity_ms = 0;  // last touch / BOOT press, for the scree
 WifiManager wifiManager(WIFI_SSID, WIFI_PASSWORD);
 ButtonManager bootButton(0);
 WifiState g_last_wifi_state = WIFI_STATE_DISCONNECTED;
+String g_connecting_ssid;  // SSID shown on the "Connecting" screen
 
 void showRadarIfConnected() {
   if (WiFi.status() != WL_CONNECTED) {
@@ -157,6 +158,8 @@ void handleInput() {
       // Tap the range scale label (bottom right of the radar) to cycle ranges.
       if (ui::radarDisplayIsScaleTapped(s_tap_x, s_tap_y)) {
         onRangeTap();
+      } else if (g_radar_visible && ui::radarDisplayIsTitleTapped(s_tap_x, s_tap_y)) {
+        ui::screensaver::begin();  // the title corner starts the screensaver now
       } else if (ui::radarDisplayHandleTouch(s_tap_x, s_tap_y)) {
         ui::radarDisplayRefreshAircraft();
         g_last_adsb_fetch_ms = 0;
@@ -229,7 +232,8 @@ void setup() {
 
   wifiManager.begin();
   if (wifiManager.getState() == WIFI_STATE_CONNECTING || wifiManager.getState() == WIFI_STATE_DISCONNECTED) {
-    statusScreenConnectingBegin(WIFI_SSID);
+    g_connecting_ssid = wifiManager.getSSID();
+    statusScreenConnectingBegin(g_connecting_ssid.c_str());
   }
 }
 
@@ -271,12 +275,17 @@ void loop() {
       if (g_radar_visible) {
         g_radar_visible = false;
       }
-      statusScreenConnectingBegin(WIFI_SSID);
+      g_connecting_ssid = wifiManager.getSSID();
+      statusScreenConnectingBegin(g_connecting_ssid.c_str());
     }
     g_last_wifi_state = current_state;
   }
 
   if (current_state == WIFI_STATE_CONNECTING) {
+    if (wifiManager.getSSID() != g_connecting_ssid) {  // failed over to the other network
+      g_connecting_ssid = wifiManager.getSSID();
+      statusScreenConnectingBegin(g_connecting_ssid.c_str());
+    }
     statusScreenConnectingTick();
   } else if (current_state == WIFI_STATE_CONNECTED) {
     if (!g_radar_visible) {

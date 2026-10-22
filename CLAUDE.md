@@ -11,7 +11,13 @@ board with the env switcher in the VS Code status bar or `-e`.
 - Same with `-e fnk0103n` for the FNK0103N (pinned to COM10; fnk0104b auto-detects its port).
 - Native USB: if upload can't connect, hold BOOT, tap RST, release BOOT, retry.
 - `pio run` sometimes fails first time with `No module named 'SCons.Tool.FortranCommon'` (PlatformIO
-  tool update racing the VS Code extension); just rerun.
+  tool update racing the VS Code extension). Root cause: the `pio` on PATH is a pip-installed Core
+  6.1.19 (MS Store Python 3.13) that wants tool-scons 4.8.1, while VS Code's `~/.platformio/penv` Core
+  6.2.0 wants 4.11.1; they swap the shared package. From a shell use
+  `~/.platformio/penv/Scripts/pio.exe`.
+- `lv_conf.h`: `LV_MEM_CUSTOM 1` (malloc) for FNK0104B too. The 24 KB pool ran out with the lat/lon/Wi-Fi
+  rows and LVGL's `LV_ASSERT_HANDLER while(1);` froze the board right after drawing the title and Wi-Fi
+  icon. Verified on hardware: settings opens, heap -22 KB while open.
 - `config/secrets.h` exists with blank SSID/password on purpose (gitignored): the board
   opens the `cyd-flight-radar-XXXX` captive portal for Wi-Fi and location.
 
@@ -62,6 +68,17 @@ board with the env switcher in the VS Code status bar or `-e`.
   `setup()`); it was never persisted, so it reset to UTC every boot. `airports`, `med_airports`, `auto_dim`
   were saved but never loaded; `setup()` now reads them back too.
 
+- Settings menu has text rows (`create_edit_row`, `kEditFields`) for Latitude, Longitude, WiFi 1
+  SSID/Pass, WiFi 2 SSID/Pass (passwords shown in plain text). Tapping one opens a full-screen
+  `lv_keyboard` editor (number mode for lat/lon) with Save / Cancel `lv_btn`s under the text field;
+  bad lat/lon shows "Invalid ...". The keyboard's own OK / keyboard keys (CLICK_TRIG: fire on release)
+  did nothing on the FNK0104B; they are still wired to the same `editor_save` / `close_editor`. Lat/lon go through `services::location::saveFromStrings` (radar re-centres on the next
+  fetch); Wi-Fi goes to prefs `"wifi"`: `ssid`/`pass` (same keys as the portal) and `ssid2`/`pass2`.
+- `WifiManager` keeps two networks (`_ssids[2]`): tries the last-used one, then the other
+  (`tryOtherNetwork`), and only then opens the captive portal. Credentials are re-read from prefs on
+  every reconnect cycle, so settings edits apply after reboot or a dropped connection. The Connecting
+  screen shows the SSID actually being tried (`getSSID()`). Not yet verified on hardware.
+
 ## FNK0103N port (ESP32 classic, 3.5" ST7796 320x480, XPT2046 resistive)
 - `[env:fnk0103n]` (extends `cyd_base`, esp32dev). Shared code is guarded by `BOARD_FNK0103N` /
   `PLANE_LIST` etc., so changes for one board must keep the other env building.
@@ -98,6 +115,7 @@ board with the env switcher in the VS Code status bar or `-e`.
   ~1.8 KB) lets trails fade without changing glyphs; freed on exit. Not yet seen on hardware.
   Starts after `getScreensaverTimeoutMs()` with no touch/BOOT press, only while the radar is up and settings
   closed; backlight drops to `kScreensaverBrightness` (80; 40 hid the dark greens). Fetches keep running, radar redraws are skipped.
+  Tapping the "Flight Radar" / "CYD" title corner starts it immediately (`radarDisplayIsTitleTapped`).
   The waking touch/press is swallowed, then `radarDisplayDraw()`. Wi-Fi state changes end it.
   Settings row "Screensaver": Off/1/5/10/30/60 min, pref `"ss_min"`, default `kScreensaverDefaultMin` = 1
   (for testing; raise to 30 later).
