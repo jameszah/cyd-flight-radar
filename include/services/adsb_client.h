@@ -50,6 +50,8 @@ constexpr size_t kMaxAircraft = 40;
 
 size_t aircraftCount();
 const Aircraft* aircraftList();
+/** Aircraft from the last fetch dropped because the Max Planes cap was reached. */
+size_t hiddenAircraftCount();
 
 
 /**

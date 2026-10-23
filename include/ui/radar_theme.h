@@ -50,9 +50,20 @@ constexpr int kCenterDotRadius = 2;
 constexpr int kAircraftNoseLenPx = 8;
 constexpr int kAircraftTailLenPx = 3;
 constexpr int kAircraftTailHalfPx = 4;
-/** Dot in the middle of the icon at or above this altitude. */
-constexpr float kCruiseDotAltitudeFt = 25000.0f;
-constexpr int kCruiseDotRadiusPx = 2;
+/** Airplane silhouette icon (all planes): fuselage, swept wings, tail plane. Full size at
+ *  or above kHighAltitudeFt. Forward distances are px ahead of the icon centre (negative = behind). */
+constexpr int kPlaneNoseFwdPx = kAircraftNoseLenPx;
+constexpr int kPlaneTailFwdPx = -6;
+constexpr int kPlaneWingRootFwdPx = 2;
+constexpr int kPlaneWingTipFwdPx = -1;   // sweep back to the tips
+constexpr int kPlaneWingHalfSpanPx = 7;
+constexpr int kPlaneStabRootFwdPx = -4;
+constexpr int kPlaneStabTipFwdPx = -6;
+constexpr int kPlaneStabHalfSpanPx = 3;
+/** drawWideLine half-width for the silhouette strokes (~2-3 px total). */
+constexpr float kPlaneStrokeHalfWidth = 1.2f;
+/** Climbing / level / descending planes (below kHighAltitudeFt) are drawn this much smaller. */
+constexpr float kPlaneIconSmallScale = 0.75f;
 /** Track vector: ground distance covered in this many seconds at current gs. */
 constexpr float kAircraftTrackHorizonSec = 60.0f;
 /** Minimum visible vector when gs > 0 (px). */
@@ -132,13 +143,14 @@ extern uint16_t kColorRunwayLabel;
 extern uint16_t kColorRunwayLine;
 
 /** Aircraft icon colors by altitude / vertical trend. */
-constexpr float kHighAltitudeFt = 10000.0f;
+constexpr float kCruiseAltitudeFt = 25000.0f;
+constexpr float kHighAltitudeFt = 15000.0f;  // was 10000
 /** |vertical rate| below this (ft/min) counts as level flight. */
 constexpr float kLevelFlightFpm = 200.0f;
-extern uint16_t kColorAltHigh;     // >= kHighAltitudeFt
+extern uint16_t kColorAltCruise;   // >= kCruiseAltitudeFt (white)
+extern uint16_t kColorAltHigh;     // >= kHighAltitudeFt (light pink)
 extern uint16_t kColorAltClimb;    // below, climbing
 extern uint16_t kColorAltDescend;  // below, descending
-extern uint16_t kColorCruiseDot;   // dot in the icon >= kCruiseDotAltitudeFt
 extern uint16_t kColorAltLevel;    // below, level / on ground / unknown
 
 }  // namespace ui::radar

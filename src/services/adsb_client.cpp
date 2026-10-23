@@ -26,6 +26,7 @@ constexpr unsigned long kRequestTimeoutMs = 10000;
 Aircraft s_aircraft[kMaxAircraft];
 Aircraft s_aircraft_buffer[kMaxAircraft];
 size_t s_aircraft_count = 0;
+size_t s_hidden_count = 0;
 
 // WiFiClientSecure is a module-scope singleton intentionally.
 // Its constructor allocates ~6KB of persistent state (sslclient_context).
@@ -61,6 +62,8 @@ void fillTagFields(Aircraft* ac, const JsonObject& plane) {
 size_t aircraftCount() { return s_aircraft_count; }
 
 const Aircraft* aircraftList() { return s_aircraft; }
+
+size_t hiddenAircraftCount() { return s_hidden_count; }
 
 JsonDocument& filterDoc() {
   static JsonDocument filter;
@@ -332,6 +335,7 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
   }
 
   size_t n = 0;
+  size_t hidden = 0;
   static char jsonStr[2048];
 
   { // Block scope
@@ -368,6 +372,7 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
     // CPU and stack during JSON parsing. Aircraft are now simply capped in
     // arrival order (the API already returns them ordered by distance).
     if (n >= aircraft_limit) {
+      ++hidden;  // passed the filters but over the cap: reported as "not shown"
       continue;
     }
     Aircraft* target_ac = &s_aircraft_buffer[n];
@@ -432,8 +437,10 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
   // Double buffer copy
   memcpy(s_aircraft, s_aircraft_buffer, n * sizeof(Aircraft));
   s_aircraft_count = n;
+  s_hidden_count = hidden;
 
-  Serial.printf("adsb: %u aircraft\n", static_cast<unsigned>(n));
+  Serial.printf("adsb: %u aircraft, %u over cap\n", static_cast<unsigned>(n),
+                static_cast<unsigned>(hidden));
 
   } // end block scope: doc destructs HERE, freeing its pool BEFORE http.end()
     // + client.stop(). This ensures the heap allocator sees doc's freed region

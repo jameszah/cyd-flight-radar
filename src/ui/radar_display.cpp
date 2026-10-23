@@ -48,11 +48,12 @@ uint16_t kColorTagAltitude = hex2rgb565(0x5AC8FF);
 uint16_t kColorRunway = hex2rgb565(0x3896AA);
 uint16_t kColorRunwayLabel = hex2rgb565(0xFFFFFF);
 uint16_t kColorRunwayLine = hex2rgb565(0xFFFFFF);
-uint16_t kColorAltHigh = hex2rgb565(0xFFFFFF);
+uint16_t kColorAltCruise = hex2rgb565(0xFFFFFF);
+// Light pink picked to survive the RGB332 frame sprite (0xFFB6C1 turns lavender there).
+uint16_t kColorAltHigh = hex2rgb565(0xFFB6AA);
 uint16_t kColorAltClimb = hex2rgb565(0x00FF00);
 uint16_t kColorAltDescend = hex2rgb565(0xFF0000);
 uint16_t kColorAltLevel = hex2rgb565(0xFFFF00);
-uint16_t kColorCruiseDot = hex2rgb565(0xFF0000);
 
 }  // namespace radar
 
@@ -70,11 +71,11 @@ void updateThemeColors() {
     radar::kColorRunway = radar::hex2rgb565(0x3896AA);
     radar::kColorRunwayLabel = radar::hex2rgb565(0xFFFFFF);
     radar::kColorRunwayLine = radar::hex2rgb565(0xFFFFFF);
-    radar::kColorAltHigh = radar::hex2rgb565(0xFFFFFF);
+    radar::kColorAltCruise = radar::hex2rgb565(0xFFFFFF);
+    radar::kColorAltHigh = radar::hex2rgb565(0xFFB6AA);
     radar::kColorAltClimb = radar::hex2rgb565(0x00FF00);
     radar::kColorAltDescend = radar::hex2rgb565(0xFF0000);
     radar::kColorAltLevel = radar::hex2rgb565(0xFFFF00);
-    radar::kColorCruiseDot = radar::hex2rgb565(0xFF0000);
 }
 
 namespace {
@@ -349,37 +350,37 @@ void noseTip(int cx, int cy, float heading_deg, int* tip_x, int* tip_y) {
   *tip_y = cy - static_cast<int>(lroundf(cosf(rad) * radar::kAircraftNoseLenPx));
 }
 
-bool isCruiseAltitude(const services::adsb::Aircraft& plane) {
-  return !isnan(plane.alt_ft) && plane.alt_ft >= radar::kCruiseDotAltitudeFt;
+// Full-size icon at or above kHighAltitudeFt; climbing / level / descending
+// traffic below that is drawn at kPlaneIconSmallScale.
+bool isHighAltitude(const services::adsb::Aircraft& plane) {
+  return !isnan(plane.alt_ft) && plane.alt_ft >= radar::kHighAltitudeFt;
 }
 
-void drawHeadingTriangle(int cx, int cy, float heading_deg, uint16_t color,
-                         bool cruise_dot = false) {
+// Airplane silhouette: fuselage, swept wings, tail plane, all kPlane* px scaled by
+// scale. (fwd, side) is a point in the icon's frame: fwd along the heading, side to its right.
+void drawPlaneIcon(int cx, int cy, float heading_deg, uint16_t color, bool full_size) {
   constexpr float kDegToRad = 0.01745329252f;
   const float rad = heading_deg * kDegToRad;
   const float sin_h = sinf(rad);
   const float cos_h = cosf(rad);
+  const float scale = full_size ? 1.0f : radar::kPlaneIconSmallScale;
 
-  int tip_x = 0;
-  int tip_y = 0;
-  noseTip(cx, cy, heading_deg, &tip_x, &tip_y);
-
-  const int base_x =
-      cx - static_cast<int>(lroundf(sin_h * static_cast<float>(radar::kAircraftTailLenPx)));
-  const int base_y =
-      cy + static_cast<int>(lroundf(cos_h * static_cast<float>(radar::kAircraftTailLenPx)));
-
-  const int wing_x = static_cast<int>(lroundf(cos_h * radar::kAircraftTailHalfPx));
-  const int wing_y = static_cast<int>(lroundf(sin_h * radar::kAircraftTailHalfPx));
-
-  s_draw->fillTriangle(tip_x, tip_y, base_x + wing_x, base_y + wing_y,
-                       base_x - wing_x, base_y - wing_y, color);
-
-  if (cruise_dot) {
-    // Centroid of the triangle (the two base corners average to base_x/y).
-    const int dot_x = (tip_x + 2 * base_x) / 3;
-    const int dot_y = (tip_y + 2 * base_y) / 3;
-    s_draw->fillCircle(dot_x, dot_y, radar::kCruiseDotRadiusPx, radar::kColorCruiseDot);
+  auto px = [&](int fwd, int side) {
+    return cx + static_cast<int>(lroundf((sin_h * fwd + cos_h * side) * scale));
+  };
+  auto py = [&](int fwd, int side) {
+    return cy + static_cast<int>(lroundf((-cos_h * fwd + sin_h * side) * scale));
+  };
+  const float half_width = std::max(1.0f, radar::kPlaneStrokeHalfWidth * scale);
+  auto stroke = [&](int f0, int s0, int f1, int s1) {
+    s_draw->drawWideLine(px(f0, s0), py(f0, s0), px(f1, s1), py(f1, s1), half_width, color);
+  };
+  stroke(radar::kPlaneNoseFwdPx, 0, radar::kPlaneTailFwdPx, 0);
+  for (int side : {-1, 1}) {
+    stroke(radar::kPlaneWingRootFwdPx, 0, radar::kPlaneWingTipFwdPx,
+           side * radar::kPlaneWingHalfSpanPx);
+    stroke(radar::kPlaneStabRootFwdPx, 0, radar::kPlaneStabTipFwdPx,
+           side * radar::kPlaneStabHalfSpanPx);
   }
 }
 
@@ -492,9 +493,13 @@ void drawAircraftTag(int x, int y, const services::adsb::Aircraft& plane) {
   s_draw->drawString(plane.type, anchor_x, ly);
 }
 
-/** Icon color: high (>= kHighAltitudeFt), else climbing / descending / level. */
+/** Icon color: cruise (>= kCruiseAltitudeFt), high (>= kHighAltitudeFt), else
+ *  climbing / descending / level. */
 uint16_t aircraftAltitudeColor(const services::adsb::Aircraft& plane) {
-  if (!isnan(plane.alt_ft) && plane.alt_ft >= radar::kHighAltitudeFt) {
+  if (!isnan(plane.alt_ft) && plane.alt_ft >= radar::kCruiseAltitudeFt) {
+    return radar::kColorAltCruise;
+  }
+  if (isHighAltitude(plane)) {
     return radar::kColorAltHigh;
   }
   if (plane.vrate_fpm >= radar::kLevelFlightFpm) {
@@ -610,8 +615,8 @@ void drawAircraft() {
     if (planes[i].is_heli) {
       drawHelicopterSymbol(x, y, planes[i].nose_deg, radar::kColorHelicopter);
     } else {
-      drawHeadingTriangle(x, y, planes[i].nose_deg, aircraftAltitudeColor(planes[i]),
-                          isCruiseAltitude(planes[i]));
+      drawPlaneIcon(x, y, planes[i].nose_deg, aircraftAltitudeColor(planes[i]),
+                    isHighAltitude(planes[i]));
     }
   }
   for (size_t d = 0; d < draw_count; ++d) {
@@ -722,9 +727,11 @@ void drawScaleLabel() {
 // Rows go bottom-up; the shortest words sit highest, where the ring curves in.
 constexpr int kLegendTextHeightPx = 10;
 constexpr int kLegendRowPx = 11;
-constexpr int kLegendIconCx = 5;   // triangle spans x 2..13 pointing east
-constexpr int kLegendTextX = 16;
+constexpr int kLegendIconCx = 7;   // full-size silhouette spans x 1..15 pointing east
+constexpr int kLegendTextX = 18;
 constexpr int kLegendBottomRowCy = radar::kSize - 6;
+// Row step is kLegendRowPx - 1 between small icons, plus this per full-size icon.
+constexpr int kLegendFullExtraPx = 2;
 
 // Small corner text (legend, coordinates, title). *vlw_size caches the smooth
 // font size for height_px; the bitmap fallback is always Font0.
@@ -784,24 +791,30 @@ void drawAltitudeLegend() {
   struct Row {
     const char* text;
     uint16_t color;
+    bool full_size;
   };
-  // Top to bottom.
+  // Bottom to top. Full-size icons need more room for their wingspan; "25k" and
+  // "15k" are short enough to stay clear of the outer ring up there.
   const Row rows[] = {
-      {"high", radar::kColorAltHigh},
-      {"climb", radar::kColorAltClimb},
-      {"flat", radar::kColorAltLevel},
-      {"descend", radar::kColorAltDescend},
+      {"descend", radar::kColorAltDescend, false},
+      {"flat", radar::kColorAltLevel, false},
+      {"climb", radar::kColorAltClimb, false},
+      {"15k", radar::kColorAltHigh, true},
+      {"25k", radar::kColorAltCruise, true},
   };
-  constexpr int kRows = sizeof(rows) / sizeof(rows[0]);
 
   static float s_vlw_size = 0.0f;
   applyCornerTextStyle(kLegendTextHeightPx, &s_vlw_size, radar::kColorLabel);
   s_draw->setTextDatum(textdatum_t::middle_left);
 
+  constexpr int kRows = sizeof(rows) / sizeof(rows[0]);
+  int cy = kLegendBottomRowCy;
   for (int i = 0; i < kRows; ++i) {
-    const int cy = kLegendBottomRowCy - (kRows - 1 - i) * kLegendRowPx;
-    drawHeadingTriangle(kLegendIconCx, cy, 90.0f, rows[i].color);
+    drawPlaneIcon(kLegendIconCx, cy, 90.0f, rows[i].color, rows[i].full_size);
     s_draw->drawString(rows[i].text, kLegendTextX, cy);
+    if (i + 1 < kRows) {
+      cy -= kLegendRowPx - 1 + kLegendFullExtraPx * (rows[i].full_size + rows[i + 1].full_size);
+    }
   }
 }
 
@@ -1027,6 +1040,25 @@ void drawAircraftCount() {
   tft.setTextPadding(80);
   tft.drawString(buf, kScreenW / 2, kScreenH - 2);
   tft.setTextPadding(0);
+}
+
+// "+N not shown" just under the radar when the Max Planes cap dropped aircraft
+// (the farthest ones: adsb.fi lists them closest first). Drawn only while no
+// aircraft is selected, since the selected details use this line.
+void drawHiddenCount(uint16_t bg) {
+  const size_t hidden = services::adsb::hiddenAircraftCount();
+  if (hidden == 0) return;
+  tft.setTextDatum(textdatum_t::top_center);
+  tft.setTextColor(radar::kColorAltDescend, bg);
+  displayFontEnsureLoaded(tft);
+  if (displayFontIsSmooth()) {
+    displayFontSetSmoothSize(tft, 0.7f);
+  } else {
+    displayFontSetBitmap(tft, &fonts::FreeSansBold9pt7b);
+  }
+  char buf[32];
+  snprintf(buf, sizeof(buf), "+%u not shown (max planes)", static_cast<unsigned>(hidden));
+  tft.drawString(buf, kScreenW / 2, radar::kShownSize + 4);
 }
 
 // Selected aircraft: callsign/reg, type, altitude/speed, distance/route, from y = ly.
@@ -1359,6 +1391,7 @@ void drawDetailsPanel() {
     // Clear the rest of the lines
     tft.fillRect(0, radar::kShownSize + 4, kScreenW, (kScreenH - radar::kShownSize) / 2 - 12, bg);
     tft.fillRect(0, radar::kShownSize + (kScreenH - radar::kShownSize) / 2 + 12, kScreenW, (kScreenH - radar::kShownSize) / 2 - 24, bg);
+    drawHiddenCount(bg);
     return;
   }
   

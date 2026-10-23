@@ -50,10 +50,15 @@ board with the env switcher in the VS Code status bar or `-e`.
 
 - Main-display aircraft tag now shows only the type (callsign + altitude removed; still in the info panel).
   Icon color by altitude (`aircraftAltitudeColor` in `radar_display.cpp`, thresholds in `radar_theme.h`):
-  >= 10000 ft white (was 20000); below that green climbing / red descending / yellow level (|rate| < 200 fpm),
-  ground or unknown. Uses adsb.fi `baro_rate`/`geom_rate` (new `Aircraft::alt_ft`, `vrate_fpm`), falling
+  >= `kCruiseAltitudeFt` (25000) white, >= `kHighAltitudeFt` (15000, was 10000) light pink `0xFFB6AA`
+  (chosen to survive the RGB332 frame sprite; 0xFFB6C1 goes lavender); below that green climbing /
+  red descending / yellow level (|rate| < 200 fpm), ground or unknown. Every plane (not helicopters)
+  is an airplane silhouette (`drawPlaneIcon`: fuselage, swept wings, tail plane as 2-3 px wide lines;
+  `kPlane*` in `radar_theme.h`): full size at >= 15000, `kPlaneIconSmallScale` (0.75) below. Replaced
+  the filled triangle + red cruise dot (two stacked triangles were tried: unreadable). Legend rows
+  bottom-up: descend / flat / climb (small), "15k", "25k" (full size). Uses adsb.fi `baro_rate`/`geom_rate` (new `Aircraft::alt_ft`, `vrate_fpm`), falling
   back to the altitude change since the previous fetch. Applies to military too; helicopters stay cyan.
-  A legend (`drawAltitudeLegend`: high / climb / flat / descend with icons) sits in the lower-left
+  A legend (`drawAltitudeLegend`, icons + labels) sits in the lower-left
   corner outside the outer ring, drawn with the static grid. `drawCenterCoordinates` writes the radar
   center (e.g. `51.05N` / `114.07W`, 12px) in the upper-left corner (`drawCornerInfo`). When exactly
   one airport is in range, `runway::drawAirports` skips its on-circle label and returns it, and the
@@ -119,6 +124,14 @@ board with the env switcher in the VS Code status bar or `-e`.
   The waking touch/press is swallowed, then `radarDisplayDraw()`. Wi-Fi state changes end it.
   Settings row "Screensaver": Off/1/5/10/30/60 min, pref `"ss_min"`, default `kScreensaverDefaultMin` = 1
   (for testing; raise to 30 later).
+
+## 25 mi range (both boards)
+- 5th preset in `kRangePresets`: ring 3 = 40.2336 km (labels "25mi" / "40km"), outer ~33 mi, fetch ~32 nm.
+  Added at the end so saved `rangeIdx` values keep their meaning.
+- `services::adsb::hiddenAircraftCount()`: aircraft that passed the filters but were over the Max Planes
+  cap (the farthest ones). `drawHiddenCount` shows "+N not shown (max planes)" in red at the top of the
+  bottom panel while nothing is selected (not in the FNK0103N `PLANE_LIST` layout). Serial prints
+  `adsb: N aircraft, M over cap`. Not yet verified on hardware.
 
 ## Not yet verified on hardware
 - Range-label tap (just re-enabled) and the airport label placement.
