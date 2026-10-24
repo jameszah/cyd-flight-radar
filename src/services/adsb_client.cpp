@@ -375,6 +375,7 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
     target_ac->is_heli = utils::adsb::isHelicopter(plane);
     target_ac->is_military = utils::adsb::isMilitary(plane);
     fillTagFields(target_ac, plane);
+    target_ac->is_trainer = utils::adsb::isTrainerType(target_ac->type);
 
     float alt_ft = NAN;
     if (utils::adsb::isOnGround(plane)) {

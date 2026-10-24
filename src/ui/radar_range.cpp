@@ -94,7 +94,7 @@ void setRangeIndex(uint8_t index) {
 float fetchRadiusKm() {
   const float outer_km = rangeCurrent().outer_km;
   const float screen_r_px =
-      static_cast<float>(kCenterX - kBeyondRingScreenMarginPx);
+      static_cast<float>(kCenterX - kFetchScreenMarginPx);
   return outer_km * (screen_r_px / static_cast<float>(kGridOuterRadius));
 }
 

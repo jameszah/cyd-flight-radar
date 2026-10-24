@@ -62,8 +62,8 @@ constexpr double kDefaultRadarLat = 33.942183;
 constexpr double kDefaultRadarLon = -118.403560;
 
 /** Poll adsb.fi (API public limit: ~1 req/s per IP, shared by every board on the same
- *  connection). Fetches happen as the sweep passes north, once per turn or every few turns,
- *  so at least this far apart (also used when the sweep is off). */
+ *  connection). With the sweep on, fetches happen once per turn as the beam passes north;
+ *  this interval is used only when the sweep is off. */
 constexpr unsigned long kAdsbFetchIntervalMs = 6000;
 /** Taps that force a fetch (range change, selecting a plane) wait this long after the last one. */
 constexpr unsigned long kAdsbMinFetchGapMs = 2000;

@@ -271,7 +271,10 @@ bool isInsideOuterRing(int x, int y) {
 }
 
 /** Rim dot from true bearing; always on screen edge (even if target is 50+ km away). */
-bool beyondRingEdgeDotFromLatLon(float lat, float lon, int* out_x, int* out_y) {
+// Rim point for an aircraft beyond the outer ring: at its bearing, just outside the ring
+// so an icon extent_px in radius clears it, pulled in where needed to stay on screen
+// (near N/S/E/W the icon then overlaps the ring a little).
+bool beyondRingEdgeDotFromLatLon(float lat, float lon, int extent_px, int* out_x, int* out_y) {
   float dx_km = 0.0f;
   float dy_km = 0.0f;
   float dist_km = 0.0f;
@@ -285,16 +288,14 @@ bool beyondRingEdgeDotFromLatLon(float lat, float lon, int* out_x, int* out_y) {
 
   const int cx = radar::kCenterX;
   const int cy = radar::kCenterY;
-  const int rim_r = radar::kCenterX - radar::kBeyondRingScreenMarginPx;
+  const int rim_r = radar::kGridOuterRadius + extent_px + radar::kBeyondRingIconGapPx;
   const float angle_rad = atan2f(dx_km, dy_km);
 
-  *out_x = cx + static_cast<int>(lroundf(sinf(angle_rad) * rim_r));
-  *out_y = cy - static_cast<int>(lroundf(cosf(angle_rad) * rim_r));
+  const int lo = extent_px;
+  const int hi = radar::kSize - 1 - extent_px;
+  *out_x = std::min(hi, std::max(lo, cx + static_cast<int>(lroundf(sinf(angle_rad) * rim_r))));
+  *out_y = std::min(hi, std::max(lo, cy - static_cast<int>(lroundf(cosf(angle_rad) * rim_r))));
   return true;
-}
-
-void drawBeyondRingDot(int x, int y, uint16_t color) {
-  s_draw->fillSmoothCircle(x, y, radar::kBeyondRingDotRadiusPx, color);
 }
 
 void clipPointToOuterRing(int x0, int y0, int* x1, int* y1) {
@@ -358,7 +359,9 @@ bool isHighAltitude(const services::adsb::Aircraft& plane) {
 
 // Airplane silhouette: fuselage, swept wings, tail plane, all kPlane* px scaled by
 // scale. (fwd, side) is a point in the icon's frame: fwd along the heading, side to its right.
-void drawPlaneIcon(int cx, int cy, float heading_deg, uint16_t color, bool full_size) {
+// trainer: straight wings and tail plane (kTrainer*) instead, for flight-school types.
+void drawPlaneIcon(int cx, int cy, float heading_deg, uint16_t color, bool full_size,
+                   bool trainer = false) {
   constexpr float kDegToRad = 0.01745329252f;
   const float rad = heading_deg * kDegToRad;
   const float sin_h = sinf(rad);
@@ -375,6 +378,14 @@ void drawPlaneIcon(int cx, int cy, float heading_deg, uint16_t color, bool full_
   auto stroke = [&](int f0, int s0, int f1, int s1) {
     s_draw->drawWideLine(px(f0, s0), py(f0, s0), px(f1, s1), py(f1, s1), half_width, color);
   };
+  if (trainer) {
+    stroke(radar::kTrainerNoseFwdPx, 0, radar::kTrainerTailFwdPx, 0);
+    stroke(radar::kTrainerWingFwdPx, -radar::kTrainerWingHalfSpanPx, radar::kTrainerWingFwdPx,
+           radar::kTrainerWingHalfSpanPx);
+    stroke(radar::kTrainerStabFwdPx, -radar::kTrainerStabHalfSpanPx, radar::kTrainerStabFwdPx,
+           radar::kTrainerStabHalfSpanPx);
+    return;
+  }
   stroke(radar::kPlaneNoseFwdPx, 0, radar::kPlaneTailFwdPx, 0);
   for (int side : {-1, 1}) {
     stroke(radar::kPlaneWingRootFwdPx, 0, radar::kPlaneWingTipFwdPx,
@@ -543,10 +554,10 @@ struct AircraftDrawItem {
 };
 
 struct BeyondDotDrawItem {
+  size_t index = 0;
   int x = 0;
   int y = 0;
   int dist_sq = 0;
-  uint16_t color = 0;
 };
 
 void sortDrawItemsFarFirst(AircraftDrawItem* items, size_t count) {
@@ -604,21 +615,31 @@ void drawAircraft() {
 
     int dot_x = 0;
     int dot_y = 0;
-    if (!beyondRingEdgeDotFromLatLon(planes[i].lat, planes[i].lon, &dot_x,
+    const int extent = (planes[i].is_heli || isHighAltitude(planes[i]))
+                           ? radar::kPlaneIconExtentPx
+                           : radar::kPlaneIconSmallExtentPx;
+    if (!beyondRingEdgeDotFromLatLon(planes[i].lat, planes[i].lon, extent, &dot_x,
                                      &dot_y)) {
       continue;
     }
+    dots[dot_count].index = i;
     dots[dot_count].x = dot_x;
     dots[dot_count].y = dot_y;
     dots[dot_count].dist_sq = distSqFromCenter(dot_x, dot_y);
-    dots[dot_count].color = planes[i].is_heli ? radar::kColorHelicopter
-                                              : aircraftAltitudeColor(planes[i]);
     ++dot_count;
   }
 
+  // Beyond the outer ring: the aircraft's icon (heading, colour, size, trainer shape) on
+  // the rim at its bearing; no tag, trail or vector.
   sortBeyondDotsFarFirst(dots, dot_count);
   for (size_t d = 0; d < dot_count; ++d) {
-    drawBeyondRingDot(dots[d].x, dots[d].y, dots[d].color);
+    const services::adsb::Aircraft& plane = planes[dots[d].index];
+    if (plane.is_heli) {
+      drawHelicopterSymbol(dots[d].x, dots[d].y, plane.nose_deg, radar::kColorHelicopter);
+    } else {
+      drawPlaneIcon(dots[d].x, dots[d].y, plane.nose_deg, aircraftAltitudeColor(plane),
+                    isHighAltitude(plane), plane.is_trainer);
+    }
   }
   
   s_visible_aircraft_count = draw_count + dot_count;
@@ -640,7 +661,7 @@ void drawAircraft() {
       drawHelicopterSymbol(x, y, planes[i].nose_deg, radar::kColorHelicopter);
     } else {
       drawPlaneIcon(x, y, planes[i].nose_deg, aircraftAltitudeColor(planes[i]),
-                    isHighAltitude(planes[i]));
+                    isHighAltitude(planes[i]), planes[i].is_trainer);
     }
   }
   for (size_t d = 0; d < draw_count; ++d) {
@@ -801,14 +822,45 @@ void drawCornerInfo(const runway::SingleAirport* airport) {
   s_draw->drawString(lon_buf, 2, y + kCoordRowPx);
 }
 
-// "Flight Radar" / "CYD" in the upper-right corner, outside the ring.
+// Project URL in the upper-right corner, above the ring and right of the "N"
+// (10px, or 8px when that doesn't fit, as on the 240px radar), with local time
+// (12 h, AM/PM) and UTC under it in white, same size as the lat/lon. The frame is
+// redrawn every animation tick, so the clock stays current.
+constexpr const char* kTitleText = "jameszah/cyd-flight-radar";
+constexpr int kTitleSmallTextHeightPx = 8;
+constexpr int kNorthLabelClearPx = 9;  // from the centre line: half the "N" plus a gap
+
 void drawTitle() {
   static float s_vlw_size = 0.0f;
+  static float s_small_vlw_size = 0.0f;
   applyCornerTextStyle(kTitleTextHeightPx, &s_vlw_size, radar::kColorGrid);
   s_draw->setTextDatum(textdatum_t::top_right);
-  const int right = radar::kSize - 3;
-  s_draw->drawString("Flight Radar", right, 2);
-  s_draw->drawString("CYD", right, 2 + kLegendRowPx);
+  const int right = radar::kSize - 2;
+  if (s_draw->textWidth(kTitleText) > right - (radar::kCenterX + kNorthLabelClearPx)) {
+    applyCornerTextStyle(kTitleSmallTextHeightPx, &s_small_vlw_size, radar::kColorGrid);
+  }
+  s_draw->drawString(kTitleText, right, 2);
+
+  char local_buf[12];
+  char utc_buf[12];
+  struct tm local_tm;
+  if (getLocalTime(&local_tm, 0)) {
+    const int hour12 = local_tm.tm_hour % 12 == 0 ? 12 : local_tm.tm_hour % 12;
+    snprintf(local_buf, sizeof(local_buf), "%d:%02d %s", hour12, local_tm.tm_min,
+             local_tm.tm_hour < 12 ? "AM" : "PM");
+    const time_t now = time(nullptr);
+    struct tm utc_tm;
+    gmtime_r(&now, &utc_tm);
+    snprintf(utc_buf, sizeof(utc_buf), "%02d:%02d UTC", utc_tm.tm_hour, utc_tm.tm_min);
+  } else {
+    strcpy(local_buf, "--:--");
+    strcpy(utc_buf, "--:-- UTC");
+  }
+  static float s_clock_vlw_size = 0.0f;
+  applyCornerTextStyle(kCoordTextHeightPx, &s_clock_vlw_size, TFT_WHITE);
+  const int y = 2 + kLegendRowPx;
+  s_draw->drawString(local_buf, right, y);
+  s_draw->drawString(utc_buf, right, y + kCoordRowPx);
 }
 
 void drawAltitudeLegend() {
@@ -1010,62 +1062,6 @@ uint16_t downsampleColor(uint16_t c) {
 constexpr int kScreenW = config::kDisplayWidth;
 constexpr int kScreenH = config::kDisplayHeight;
 
-void drawAppVersion() {
-  tft.setTextDatum(textdatum_t::bottom_right);
-  uint16_t bg = s_frame_ready ? downsampleColor(radar::kColorBackground) : radar::kColorBackground;
-  tft.setTextColor(lgfx::color565(120, 120, 120), bg);
-  displayFontEnsureLoaded(tft);
-  if (displayFontIsSmooth()) {
-    displayFontSetSmoothSize(tft, 0.80f);
-  } else {
-    displayFontSetBitmap(tft, &fonts::FreeSansBold12pt7b);
-  }
-  tft.setTextPadding(100);
-  tft.drawString(config::kAppVersion, kScreenW - 2, kScreenH - 2);
-  tft.setTextPadding(0);
-}
-
-void drawClock() {
-  struct tm timeinfo;
-  char time_str[16];
-  
-  if (!getLocalTime(&timeinfo, 0)) {
-    strcpy(time_str, "--:--");
-  } else {
-    strftime(time_str, sizeof(time_str), "%H:%M", &timeinfo);
-  }
-  
-  tft.setTextDatum(textdatum_t::bottom_left);
-  uint16_t bg = s_frame_ready ? downsampleColor(radar::kColorBackground) : radar::kColorBackground;
-  tft.setTextColor(lgfx::color565(120, 120, 120), bg);
-  displayFontEnsureLoaded(tft);
-  if (displayFontIsSmooth()) {
-    displayFontSetSmoothSize(tft, 0.80f);
-  } else {
-    displayFontSetBitmap(tft, &fonts::FreeSansBold12pt7b);
-  }
-  tft.setTextPadding(50);
-  tft.drawString(time_str, 2, kScreenH - 2);
-  tft.setTextPadding(0);
-}
-
-void drawAircraftCount() {
-  tft.setTextDatum(textdatum_t::bottom_center);
-  uint16_t bg = s_frame_ready ? downsampleColor(radar::kColorBackground) : radar::kColorBackground;
-  tft.setTextColor(lgfx::color565(120, 120, 120), bg);
-  displayFontEnsureLoaded(tft);
-  if (displayFontIsSmooth()) {
-    displayFontSetSmoothSize(tft, 0.80f);
-  } else {
-    displayFontSetBitmap(tft, &fonts::FreeSansBold12pt7b);
-  }
-  char buf[32];
-  snprintf(buf, sizeof(buf), "%u aircraft", static_cast<unsigned>(s_visible_aircraft_count));
-  tft.setTextPadding(80);
-  tft.drawString(buf, kScreenW / 2, kScreenH - 2);
-  tft.setTextPadding(0);
-}
-
 // "+N not shown" just under the radar when the Max Planes cap dropped aircraft
 // (the farthest ones: adsb.fi lists them closest first). Drawn only while no
 // aircraft is selected, since the selected details use this line.
@@ -1183,7 +1179,7 @@ int drawSelectedLines(const services::adsb::Aircraft* ac, int ly, uint16_t bg) {
 // PLANE_LIST (FNK0103N, 320x480): radar square top-left, a side strip to its right with
 // clock / aircraft count / version, two lines per aircraft.
 // PANEL_LIST (FNK0104S, 320x480): normal layout; one line per aircraft in the bottom panel,
-// between the selected aircraft's details (if any) and the clock / count / version row.
+// from the selected aircraft's details (if any) to the bottom of the screen.
 constexpr int kListTop = radar::kShownSize + 1;
 constexpr int kBannerH = 24;                      // "Connection Lost" strip at the very bottom
 constexpr int kListBottom = kScreenH - kBannerH;
@@ -1329,8 +1325,10 @@ const char* flightName(const services::adsb::Aircraft& plane) {
 #ifdef PLANE_LIST
 // Line 1: flight | type | description | heading.  Line 2: reg | alt | speed | climb | dist+dir.
 constexpr ListCol kListLine1[] = {{3, 57, false}, {60, 38, false}, {98, 182, false}, {318, 38, true}};
+// Distance is right-aligned and the compass point sits in its own column after it, so the
+// decimal points line up whatever the direction's width ("N" vs "NW").
 constexpr ListCol kListLine2[] = {{3, 70, false}, {125, 52, true}, {190, 65, true},
-                                  {252, 62, true}, {318, 66, true}};
+                                  {252, 62, true}, {294, 40, true}, {298, 20, false}};
 
 void drawPlaneList(uint16_t bg) {
   const services::adsb::Aircraft* planes = services::adsb::aircraftList();
@@ -1362,9 +1360,9 @@ void drawPlaneList(uint16_t bg) {
   const int row_h = 2 * line_h + 2;
   {
     const char* const h1[] = {"Flight", "Type", "Description", "Hdg"};
-    const char* const h2[] = {"Reg", "Alt", "Speed", "Climb", "Dist"};
+    const char* const h2[] = {"Reg", "Alt", "Speed", "Climb", "Dist", ""};
     drawListLine(y, line_h, radar::kColorGrid, bg, kListLine1, h1, 4);
-    drawListLine(y + line_h, line_h + 2, radar::kColorGrid, bg, kListLine2, h2, 5);
+    drawListLine(y + line_h, line_h + 2, radar::kColorGrid, bg, kListLine2, h2, 6);
   }
   y += row_h;
   s_list_rows_top = y;
@@ -1390,17 +1388,17 @@ void drawPlaneList(uint16_t bg) {
     if (miles) {
       snprintf(speed, sizeof(speed), "%.0f mph", plane.gs_knots * 1.150779f);
       snprintf(climb, sizeof(climb), "%+.0f fpm", plane.vrate_fpm);
-      snprintf(dist, sizeof(dist), "%.1f mi %s", items[k].dist_km / 1.60934f, dir);
+      snprintf(dist, sizeof(dist), "%.1f mi", items[k].dist_km / 1.60934f);
     } else {
       snprintf(speed, sizeof(speed), "%.0f km/h", plane.gs_knots * 1.852f);
       snprintf(climb, sizeof(climb), "%+.1f m/s", plane.vrate_fpm * 0.00508f);
-      snprintf(dist, sizeof(dist), "%.1f km %s", items[k].dist_km, dir);
+      snprintf(dist, sizeof(dist), "%.1f km", items[k].dist_km);
     }
     const char* const line1[] = {flight, plane.type[0] ? plane.type : "-", desc, heading};
     const char* const line2[] = {plane.reg[0] ? plane.reg : "-", plane.alt[0] ? plane.alt : "-",
-                                 speed, climb, dist};
+                                 speed, climb, dist, dir};
     drawListLine(y, line_h, fg, row_bg, kListLine1, line1, 4);
-    drawListLine(y + line_h, line_h + 2, line2_fg, row_bg, kListLine2, line2, 5);
+    drawListLine(y + line_h, line_h + 2, line2_fg, row_bg, kListLine2, line2, 6);
     strcpy(s_list_hex[rows], plane.hex);
     ++rows;
     y += row_h;
@@ -1431,9 +1429,13 @@ void drawListLayout(uint16_t bg) {
 #endif  // PLANE_LIST
 
 #ifdef PANEL_LIST
-// One line per aircraft: flight | type | altitude | speed | distance + compass direction.
-constexpr ListCol kPanelLine[] = {{3, 62, false}, {66, 40, false}, {170, 62, true},
-                                  {238, 66, true}, {318, 78, true}};
+// One line per aircraft: flight | type | altitude | climb rate | speed | distance + compass
+// direction. Distance right-aligned, compass point in its own column (decimal points line
+// up). Widths at list size 0.7: "SWG2345" ~49 px, "35000 ft" ~41, "+1200" ~32,
+// "833 km/h" ~47, "123.4 km" ~45, "NW" ~19.
+constexpr ListCol kPanelLine[] = {{3, 55, false},  {58, 34, false},  {136, 44, true},
+                                  {172, 36, true}, {244, 72, true},  {294, 50, true},
+                                  {298, 20, false}};
 int s_panel_end_y = kListTop;  // bottom of what the panel list drew last time
 
 void drawPanelList(uint16_t bg) {
@@ -1441,11 +1443,14 @@ void drawPanelList(uint16_t bg) {
   ListItem items[kMaxListRows];
   const services::adsb::Aircraft* selected = nullptr;
   const size_t count = collectByDistance(items, &selected);
+  // Rows run to the bottom of the screen; the "Connection Lost" banner takes the last
+  // kBannerH px while it's up (drawDetailsPanel draws it first and blanks it after).
+  const int list_bottom = s_data_stale ? kListBottom : kScreenH;
 
   // The details block shifts every row, so clear the whole list when it comes or goes.
   const bool has_details = selected != nullptr;
   if (s_list_needs_clear || has_details != s_list_had_details) {
-    tft.fillRect(0, kListTop, kScreenW, kListBottom - kListTop, bg);
+    tft.fillRect(0, kListTop, kScreenW, list_bottom - kListTop, bg);
     s_list_rows = 0;
     s_panel_end_y = kListTop;
     s_list_had_details = has_details;
@@ -1462,8 +1467,9 @@ void drawPanelList(uint16_t bg) {
     y += 4;
     setListFont(0.7f);
   } else {
-    const char* const head[] = {"Flight", "Type", "Alt", "Speed", "Dist"};
-    drawListLine(y, row_h, radar::kColorGrid, bg, kPanelLine, head, 5);
+    const char* const head[] = {"Flight", "Type", "Alt", ui::radar::useMiles() ? "fpm" : "m/s",
+                                "Speed", "Dist", ""};
+    drawListLine(y, row_h, radar::kColorGrid, bg, kPanelLine, head, 7);
     y += row_h;
   }
   s_list_rows_top = y;
@@ -1473,25 +1479,30 @@ void drawPanelList(uint16_t bg) {
   const bool miles = ui::radar::useMiles();
   // Keep a line free for "+N not shown" when the Max Planes cap dropped aircraft.
   const size_t hidden = selected ? 0 : services::adsb::hiddenAircraftCount();
-  const int rows_bottom = hidden ? kListBottom - row_h : kListBottom;
+  const int rows_bottom = hidden ? list_bottom - row_h : list_bottom;
   int rows = 0;
   for (size_t k = 0; k < count && y + row_h <= rows_bottom; ++k) {
     const services::adsb::Aircraft& plane = planes[items[k].index];
     const uint16_t fg = plane.is_heli ? radar::kColorHelicopter : aircraftAltitudeColor(plane);
     const uint16_t row_bg = (&plane == selected) ? highlight_bg : bg;
+    char climb[12];
     char speed[16];
     char dist[20];
     const char* dir = compassPoint(items[k].bearing_deg);
+    const bool airborne = !isnan(plane.alt_ft) && plane.alt_ft > 0.0f;
     if (miles) {
+      snprintf(climb, sizeof(climb), "%+.0f", plane.vrate_fpm);
       snprintf(speed, sizeof(speed), "%.0f mph", plane.gs_knots * 1.150779f);
-      snprintf(dist, sizeof(dist), "%.1f mi %s", items[k].dist_km / 1.60934f, dir);
+      snprintf(dist, sizeof(dist), "%.1f mi", items[k].dist_km / 1.60934f);
     } else {
+      snprintf(climb, sizeof(climb), "%+.1f", plane.vrate_fpm * 0.00508f);
       snprintf(speed, sizeof(speed), "%.0f km/h", plane.gs_knots * 1.852f);
-      snprintf(dist, sizeof(dist), "%.1f km %s", items[k].dist_km, dir);
+      snprintf(dist, sizeof(dist), "%.1f km", items[k].dist_km);
     }
     const char* const line[] = {flightName(plane), plane.type[0] ? plane.type : "-",
-                                plane.alt[0] ? plane.alt : "-", speed, dist};
-    drawListLine(y, row_h, fg, row_bg, kPanelLine, line, 5);
+                                plane.alt[0] ? plane.alt : "-", airborne ? climb : "-",
+                                speed, dist, dir};
+    drawListLine(y, row_h, fg, row_bg, kPanelLine, line, 7);
     strcpy(s_list_hex[rows], plane.hex);
     ++rows;
     y += row_h;
@@ -1508,7 +1519,7 @@ void drawPanelList(uint16_t bg) {
     y += row_h;
   }
   if (y < s_panel_end_y) {  // blank rows left over from a longer list
-    tft.fillRect(0, y, kScreenW, std::min(s_panel_end_y, kListBottom) - y, bg);
+    tft.fillRect(0, y, kScreenW, std::min(s_panel_end_y, list_bottom) - y, bg);
   }
   s_panel_end_y = y;
 }
@@ -1522,16 +1533,12 @@ void drawDetailsPanel() {
   return;
 #endif
   tft.drawFastHLine(0, radar::kShownSize, kScreenW, radar::kColorGrid);
-  // The footer text below doesn't cover the whole banner strip, so blank it once when the
-  // connection comes back (a red line was left above the clock row).
+  // Blank the "Connection Lost" banner strip once when the connection comes back.
   static bool s_banner_shown = false;
   if (s_banner_shown && !s_data_stale) {
     tft.fillRect(0, kScreenH - 24, kScreenW, 24, bg);
   }
   s_banner_shown = s_data_stale;
-  drawAppVersion();
-  drawClock();
-  drawAircraftCount();
 
   if (s_data_stale) {
     tft.fillRect(0, kScreenH - 24, kScreenW, 24, lgfx::color565(200, 0, 0));
@@ -1695,7 +1702,7 @@ bool radarDisplayIsTitleTapped(int x, int y) {
   screenToFrame(&x, &y);
   if (y >= radar::kSize) return false;
 
-  // Hit box around "Flight Radar" / "CYD" (drawTitle), outside the outer ring like the scale tap.
+  // Hit box around the URL title and the clock (drawTitle), outside the outer ring like the scale tap.
   const int min_x = radar::kSize - 75;
   const int max_y = 2 + kLegendRowPx + 20;
   if (x < min_x || y > max_y) return false;
@@ -1706,14 +1713,16 @@ void radarDisplayDraw() {
   initPalette();
   initLabelMetrics();
 
-  // Clear the full screen once to erase any previous status screens
+  // Clear the full screen once to erase any previous status screens, in the same
+  // shade the RGB332 sprite and the panel use, so strips nothing redraws match.
+  const bool frame = ensureFrameSprite();
   tft.fillRect(0, 0, config::kDisplayWidth, config::kDisplayHeight,
-               radar::kColorBackground);
+               frame ? downsampleColor(radar::kColorBackground) : radar::kColorBackground);
 #if defined(PLANE_LIST) || defined(PANEL_LIST)
   s_list_needs_clear = true;
 #endif
 
-  if (ensureFrameSprite()) {
+  if (frame) {
     renderFrame();
     drawDetailsPanel();
     return;

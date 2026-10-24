@@ -25,6 +25,8 @@ struct Aircraft {
   char desc[32];
   bool is_heli;
   bool is_military;
+  /** Flight-school type (utils::adsb::isTrainerType): drawn with the straight-wing icon. */
+  bool is_trainer;
 
   /** Altitude in feet (0 on ground, NAN if unknown). */
   float alt_ft;

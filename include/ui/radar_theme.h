@@ -60,10 +60,20 @@ constexpr int kPlaneWingHalfSpanPx = 7;
 constexpr int kPlaneStabRootFwdPx = -4;
 constexpr int kPlaneStabTipFwdPx = -6;
 constexpr int kPlaneStabHalfSpanPx = 3;
+/** Trainer icon (C172, P28A, ...): short fuselage, straight wings across it, straight tail plane. */
+constexpr int kTrainerNoseFwdPx = 6;
+constexpr int kTrainerTailFwdPx = -7;
+constexpr int kTrainerWingFwdPx = 2;
+constexpr int kTrainerWingHalfSpanPx = 8;
+constexpr int kTrainerStabFwdPx = -6;
+constexpr int kTrainerStabHalfSpanPx = 3;
 /** drawWideLine half-width for the silhouette strokes (~2-3 px total). */
 constexpr float kPlaneStrokeHalfWidth = 1.2f;
 /** Climbing / level / descending planes (below kHighAltitudeFt) are drawn this much smaller. */
 constexpr float kPlaneIconSmallScale = 0.75f;
+/** Icon radius incl. stroke (nose 8 px + ~1), full size and small; helicopters use the full one. */
+constexpr int kPlaneIconExtentPx = 9;
+constexpr int kPlaneIconSmallExtentPx = 7;
 /** Track vector: ground distance covered in this many seconds at current gs. */
 constexpr float kAircraftTrackHorizonSec = 60.0f;
 /** Minimum visible vector when gs > 0 (px). */
@@ -87,9 +97,11 @@ constexpr int kAircraftLabelGapPx = 1;
 constexpr int kAircraftInsideRingInsetPx =
     kAircraftNoseLenPx + kAircraftTailHalfPx + 1;
 
-/** Beyond-ring traffic: bearing cues on screen rim (correct direction, fixed radius). */
-constexpr int kBeyondRingDotRadiusPx = 4;
-constexpr int kBeyondRingScreenMarginPx = 2;
+/** Beyond-ring traffic: plane icon just outside the outer ring at the aircraft's bearing,
+ *  this many px clear of the ring (icon radius: kPlaneIconExtentPx / kPlaneIconSmallExtentPx). */
+constexpr int kBeyondRingIconGapPx = 1;
+/** Fetch radius reaches the screen edge less this many px (radar_range.cpp fetchRadiusKm). */
+constexpr int kFetchScreenMarginPx = 2;
 /** Target cap height (px) for aircraft tags (bold, slightly above scale label). */
 constexpr int kAircraftTagLabelHeightPx = 13;
 

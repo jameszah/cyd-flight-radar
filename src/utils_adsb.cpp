@@ -81,6 +81,24 @@ bool isHelicopter(const JsonObject& plane) {
   return false;
 }
 
+bool isTrainerType(const char* type) {
+  static const char* const kTrainerTypes[] = {
+      "C150", "C152", "C162", "C172",          // Cessna
+      "P28A", "P28R", "PA38",                  // Piper Cherokee/Warrior/Archer, Arrow, Tomahawk
+      "DV20", "DA40", "DA42",                  // Diamond
+      "SR20",                                  // Cirrus
+  };
+  if (type == nullptr || type[0] == '\0') {
+    return false;
+  }
+  for (const char* t : kTrainerTypes) {
+    if (strcmp(type, t) == 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
 void formatAltitudeTag(const JsonObject& plane, char* out, size_t out_len, bool useMiles) {
   out[0] = '\0';
   if (out_len == 0) {

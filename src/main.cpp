@@ -29,8 +29,9 @@ unsigned long g_fetch_backoff_until_ms = 0;  // after an HTTP 429: no fetches be
 unsigned long g_last_fetch_ok_ms = 0;
 unsigned long g_last_activity_ms = 0;  // last touch / BOOT press, for the screensaver
 
-// Fetch period: one sweep turn, or the fewest whole turns that reach kAdsbFetchIntervalMs,
-// so new positions land just after the beam passes north. Sweep off: kAdsbFetchIntervalMs.
+// Fetch period: one sweep turn, so new positions land just after the beam passes north.
+// Fast sweeps mean more requests to adsb.fi (~1 req/s per IP); that's up to the user.
+// Sweep off: kAdsbFetchIntervalMs.
 unsigned long fetchIntervalMs() {
   if (!ui::settings::isRadarSweepEnabled()) {
     return config::kAdsbFetchIntervalMs;
@@ -39,8 +40,7 @@ unsigned long fetchIntervalMs() {
   if (turn_ms == 0) {
     return config::kAdsbFetchIntervalMs;
   }
-  const unsigned long turns = (config::kAdsbFetchIntervalMs + turn_ms - 1) / turn_ms;
-  return turns * turn_ms;
+  return turn_ms;
 }
 
 WifiManager wifiManager(WIFI_SSID, WIFI_PASSWORD);
@@ -328,17 +328,20 @@ void loop() {
       // Scheduled fetch each time millis() crosses a period boundary: the sweep angle is
       // millis() % turn, so that's when the beam passes north. A forced fetch (g_fetch_now)
       // waits kAdsbMinFetchGapMs after the last one, and a scheduled one that comes that soon
-      // after a forced one is skipped.
+      // after a forced one is skipped (half a period for sweeps under 4 s, so 1-3 s sweeps
+      // still fetch every turn).
       {
         const unsigned long now = millis();
         const unsigned long since_last = now - g_last_adsb_fetch_ms;
         static unsigned long s_last_period = ~0UL;
         static bool s_fetch_due = false;
-        const unsigned long period = now / fetchIntervalMs();
+        const unsigned long interval = fetchIntervalMs();
+        const unsigned long period = now / interval;
+        const unsigned long scheduled_gap = min(config::kAdsbMinFetchGapMs, interval / 2);
         const bool backing_off = static_cast<long>(now - g_fetch_backoff_until_ms) < 0;
         if (period != s_last_period) {
           s_last_period = period;
-          if (since_last >= config::kAdsbMinFetchGapMs && !backing_off) {
+          if (since_last >= scheduled_gap && !backing_off) {
             s_fetch_due = true;
           }
         }

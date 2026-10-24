@@ -62,9 +62,26 @@ board with the env switcher in the VS Code status bar or `-e`.
   corner outside the outer ring, drawn with the static grid. `drawCenterCoordinates` writes the radar
   center (e.g. `51.05N` / `114.07W`, 12px) in the upper-left corner (`drawCornerInfo`). When exactly
   one airport is in range, `runway::drawAirports` skips its on-circle label and returns it, and the
-  corner shows its ident (runway color) + its lat/lon instead; `drawTitle` puts "Flight Radar" /
-  "CYD" (10px, grid green) in the upper-right. Range label is now the same height as N/S/E/W
+  corner shows its ident (runway color) + its lat/lon instead; `drawTitle` puts
+  "jameszah/cyd-flight-radar" (`kTitleText`, grid green; 10px, or 8px if it would reach the "N", which it
+  does on the 240px radar: ~124 vs ~110 px free) in the upper-right, and under it local time `2:05 PM` and
+  `21:05 UTC` in white at the lat/lon size (12px, `kCoordRowPx`), redrawn with every frame. On the 240px
+  radar the UTC line's lower-left sits close to the outer ring; not yet seen on hardware. Range label is now the same height as N/S/E/W
   (`kScaleBelowCardinalPx` 3 -> 0).
+
+- Aircraft beyond the outer ring: was a filled dot on the screen rim at its bearing; now its icon
+  (`drawPlaneIcon` with the normal 10k size rule / `drawHelicopterSymbol`, real heading, altitude colour,
+  trainer shape), no tag or vector. Icon centre = outer ring + icon radius (`kPlaneIconExtentPx` 9 /
+  `kPlaneIconSmallExtentPx` 7) + `kBeyondRingIconGapPx`, clamped on screen (overlaps the ring a bit near
+  N/S/E/W). Drawing the inside-the-ring part of their trails was tried and removed (looked
+  disconnected at the ring edge on hardware). Fetch radius has its own `kFetchScreenMarginPx`
+  (2; it used to share the old dot margin). Not yet seen on hardware.
+- Trainer icon: `utils::adsb::isTrainerType` (C150/152/162/172, P28A/P28R, PA38, DV20, DA40/42, SR20;
+  owner's local school flies C172 + P28A) sets `Aircraft::is_trainer`; `drawPlaneIcon(..., trainer)`
+  draws straight wings + straight tail plane (`kTrainer*` in `radar_theme.h`) instead of swept. Colour and
+  size rules unchanged. Not in the legend (no room above "25k" before the outer ring). Not yet seen on hardware.
+  Ideas discussed, not built: arriving/departing from runway alignment + vrate, circling from accumulated
+  heading change (trail too short at 3 s sweeps), `category`/`squawk`/`ownOp` fields, airport elevation.
 
 - `config/config.h`: `kDisplayRgbOrder` is false under `BOARD_FNK0104B` (it's a software R/B swap in
   `hex2rgb565` etc. meant for GC9A01 boards; on the ILI9341 it turned red planes blue).
@@ -157,14 +174,30 @@ board with the env switcher in the VS Code status bar or `-e`.
 
 ## adsb.fi rate limit (all boards)
 - adsb.fi allows ~1 request/s per IP; three boards at the old 3 s interval hit it (shown as "Connection Lost").
-- Fetches are now aligned to the sweep (`fetchIntervalMs()` in `main.cpp`): one sweep turn, or the fewest
-  whole turns >= `kAdsbFetchIntervalMs` (6000), fired when `millis()` crosses a period boundary (beam at north).
-  Sweep off: plain 6 s. Forced fetches (`g_fetch_now`: startup, range tap, plane tap) wait
-  `kAdsbMinFetchGapMs` (2 s) after the last one.
+- Fetches are aligned to the sweep (`fetchIntervalMs()` in `main.cpp`): one fetch per sweep turn, fired
+  when `millis()` crosses a period boundary (beam at north). No 6 s floor any more (owner's call: sweep
+  speed setting goes down to 1 s, and staying under adsb.fi's limit is up to the user).
+  Sweep off: plain `kAdsbFetchIntervalMs` (6 s). Forced fetches (`g_fetch_now`: startup, range tap, plane tap)
+  wait `kAdsbMinFetchGapMs` (2 s) after the last one; a scheduled one is skipped if it comes within
+  min(2 s, half a turn) of the last. A fetch still running when the next is due is skipped (`triggerFetch`).
 - `fetchUpdate` now reads the status line (`readHttpHeaders`); HTTP 429 sets `lastFetchRateLimited()`.
   Main then skips the next period and doesn't count it as a failure; stale only after `kAdsbStaleAfterMs` (60 s)
   with no good fetch. Serial: `adsb: HTTP 429 (rate limited by adsb.fi)`. Not yet verified on hardware.
 - `radarDisplaySetStale` only records the flag now (it used to redraw over the screensaver); callers redraw.
+
+## Bottom footer removed
+- The clock / "N aircraft" / version line at the bottom of the screen (`drawClock`, `drawAircraftCount`,
+  `drawAppVersion`) is gone. The FNK0103N `PLANE_LIST` side strip still has its own clock/count/version.
+- List Dist column (`kPanelLine`, `kListLine2`): distance right-aligned at x 294 and the compass point in
+  its own left-aligned column at 298 (was one right-aligned "12.3 mi SW" string, so N vs NW shifted the
+  numbers). Widths from the vlw at 0.7: "NW" ~19 px, "12.3 mi" ~36 px.
+- FNK0104S `PANEL_LIST` row is now flight | type | alt | climb | speed | dist | dir: Alt moved left next to
+  Type, new climb column (`vrate_fpm`, "+1200" in fpm or "+6.1" m/s; header is the unit; "-" on the ground
+  or unknown altitude), Speed right edge 238 -> 244. Column x/pad in `kPanelLine`.
+- `PANEL_LIST` rows now run to the bottom of the screen (`list_bottom` in `drawPanelList`), except the last
+  `kBannerH` px while "Connection Lost" is up.
+- `radarDisplayDraw` clears the screen with `downsampleColor(kColorBackground)` when the RGB332 sprite is in
+  use (it used the full-colour background, so strips nothing redrew, like the old footer row, were a shade off).
 
 ## Not yet verified on hardware
 - Range-label tap (just re-enabled) and the airport label placement.
