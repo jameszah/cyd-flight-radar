@@ -50,13 +50,13 @@ board with the env switcher in the VS Code status bar or `-e`.
 
 - Main-display aircraft tag now shows only the type (callsign + altitude removed; still in the info panel).
   Icon color by altitude (`aircraftAltitudeColor` in `radar_display.cpp`, thresholds in `radar_theme.h`):
-  >= `kCruiseAltitudeFt` (25000) white, >= `kHighAltitudeFt` (15000, was 10000) light pink `0xFFB6AA`
-  (chosen to survive the RGB332 frame sprite; 0xFFB6C1 goes lavender); below that green climbing /
+  >= `kCruiseAltitudeFt` (25000) white, >= `kHighAltitudeFt` (10000) green `0x00FF00` (same as climbing, full-size icon; was 15000 light pink `0xFFB6AA`
+  ); below that green climbing /
   red descending / yellow level (|rate| < 200 fpm), ground or unknown. Every plane (not helicopters)
   is an airplane silhouette (`drawPlaneIcon`: fuselage, swept wings, tail plane as 2-3 px wide lines;
-  `kPlane*` in `radar_theme.h`): full size at >= 15000, `kPlaneIconSmallScale` (0.75) below. Replaced
+  `kPlane*` in `radar_theme.h`): full size at >= 10000, `kPlaneIconSmallScale` (0.75) below. Replaced
   the filled triangle + red cruise dot (two stacked triangles were tried: unreadable). Legend rows
-  bottom-up: descend / flat / climb (small), "15k", "25k" (full size). Uses adsb.fi `baro_rate`/`geom_rate` (new `Aircraft::alt_ft`, `vrate_fpm`), falling
+  bottom-up: descend / flat / climb (small), "10k", "25k" (full size). Uses adsb.fi `baro_rate`/`geom_rate` (new `Aircraft::alt_ft`, `vrate_fpm`), falling
   back to the altitude change since the previous fetch. Applies to military too; helicopters stay cyan.
   A legend (`drawAltitudeLegend`, icons + labels) sits in the lower-left
   corner outside the outer ring, drawn with the static grid. `drawCenterCoordinates` writes the radar
@@ -111,7 +111,29 @@ board with the env switcher in the VS Code status bar or `-e`.
 - Not verified: touch calibration (raw 300..3900, y reversed: a guess), colours, whether the
   100 KB 320x320 sprite plus TLS fit in heap (fallback: `RADAR_SIZE=240`).
 
-## Screensaver (both boards)
+## FNK0104S port (ESP32-S3, 4.0" ST7796 320x480, FT6336 capacitive)
+- `[env:fnk0104s]` (own section, same platform/board as fnk0104b; no `extends`: suspected cause of the VS Code env switcher error "Cannot read properties of undefined (reading 'id')"; unconfirmed). Pins from Freenove's
+  `Libraries/FNK0104S/TFT_eSPI_Setups` (FNK0104S_4.0_320x480_ST7796.h): same LCD pins as the FNK0104B
+  (MOSI 11, SCLK 12, CS 10, DC 46, BL 45, no MISO), inversion on, 80 MHz. Touch is the same FT6336
+  (SDA 16, SCL 15, RST 18, INT 17), but `lgfx::Touch_FT5x06` never detected it (no taps at all), so the
+  FNK0104S uses `include/hardware/touch_ft6336.hpp` (`Touch_FT6336`: 300 ms after reset, no vendor-ID
+  check, polls TD_STATUS, ignores INT; `TOUCH_DEBUG` prints probe/read-fail status every 5 s).
+  Touch axes are NOT flipped on the FNK0104S (the FNK0104B flip made both axes backwards; checked on hardware).
+- USB is native (COM6, VID 303A), like the FNK0104B. COM4 (CH340) is a different device.
+- Same layout as the 2.8": `radar::kSize` = 320 (full width), bottom panel 160px. Pixel pitch is about
+  the same as the 2.8", so fonts/icons keep their pixel sizes. 320x320 RGB332 sprite = 100 KB in internal
+  RAM (PSRAM not enabled: module type unknown); falls back to direct draw if the alloc fails.
+- `TAG_CALLSIGN` (env flag): radar tags show the callsign above the type (`tagCallsign`).
+  `PANEL_LIST` (env flag): the bottom panel lists aircraft closest first, one line each
+  (flight | type | alt | speed | dist+compass, `kPanelLine`, `drawPanelList`), in icon colour, with a header
+  row (or the selected aircraft's details above the rows), "+N not shown" last. Under PANEL_LIST
+  `drawSelectedLines` uses two lines: alt/speed and distance/route right-aligned beside ident and type. Rows are tappable
+  (shared `s_list_hex` map with PLANE_LIST). Shared list helpers (`ListCol`, `drawListLine`, `fitText`,
+  `collectByDistance`, `compassPoint`, `flightName`) are under `PLANE_LIST || PANEL_LIST`. Not yet seen on hardware.
+- Verified on hardware: display, colours, touch detection and direction. Heap with the 100 KB sprite and
+  TLS: free ~61-104 KB, largest block ~37-49 KB during fetches.
+
+## Screensaver (all boards)
 - `src/ui/screensaver.cpp`: matrix rain (from a pasted blocking sketch, made non-blocking:
   `begin/tick/end`, ticked from `loop()` every `kScreensaverFrameMs` (50), straight to `tft`).
   Reworked to look like the film: one stream per 7x12 column, halfwidth katakana (U+FF66-FF9D) + digits
@@ -125,13 +147,24 @@ board with the env switcher in the VS Code status bar or `-e`.
   Settings row "Screensaver": Off/1/5/10/30/60 min, pref `"ss_min"`, default `kScreensaverDefaultMin` = 1
   (for testing; raise to 30 later).
 
-## 25 mi range (both boards)
+## 25 mi range (all boards)
 - 5th preset in `kRangePresets`: ring 3 = 40.2336 km (labels "25mi" / "40km"), outer ~33 mi, fetch ~32 nm.
   Added at the end so saved `rangeIdx` values keep their meaning.
 - `services::adsb::hiddenAircraftCount()`: aircraft that passed the filters but were over the Max Planes
   cap (the farthest ones). `drawHiddenCount` shows "+N not shown (max planes)" in red at the top of the
   bottom panel while nothing is selected (not in the FNK0103N `PLANE_LIST` layout). Serial prints
   `adsb: N aircraft, M over cap`. Not yet verified on hardware.
+
+## adsb.fi rate limit (all boards)
+- adsb.fi allows ~1 request/s per IP; three boards at the old 3 s interval hit it (shown as "Connection Lost").
+- Fetches are now aligned to the sweep (`fetchIntervalMs()` in `main.cpp`): one sweep turn, or the fewest
+  whole turns >= `kAdsbFetchIntervalMs` (6000), fired when `millis()` crosses a period boundary (beam at north).
+  Sweep off: plain 6 s. Forced fetches (`g_fetch_now`: startup, range tap, plane tap) wait
+  `kAdsbMinFetchGapMs` (2 s) after the last one.
+- `fetchUpdate` now reads the status line (`readHttpHeaders`); HTTP 429 sets `lastFetchRateLimited()`.
+  Main then skips the next period and doesn't count it as a failure; stale only after `kAdsbStaleAfterMs` (60 s)
+  with no good fetch. Serial: `adsb: HTTP 429 (rate limited by adsb.fi)`. Not yet verified on hardware.
+- `radarDisplaySetStale` only records the flag now (it used to redraw over the screensaver); callers redraw.
 
 ## Not yet verified on hardware
 - Range-label tap (just re-enabled) and the airport label placement.

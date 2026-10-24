@@ -24,7 +24,24 @@ namespace {
 bool g_radar_visible = false;
 bool g_screen_on = true;
 unsigned long g_last_adsb_fetch_ms = 0;
+bool g_fetch_now = true;                  // fetch as soon as allowed (startup, range change, tap)
+unsigned long g_fetch_backoff_until_ms = 0;  // after an HTTP 429: no fetches before this
+unsigned long g_last_fetch_ok_ms = 0;
 unsigned long g_last_activity_ms = 0;  // last touch / BOOT press, for the screensaver
+
+// Fetch period: one sweep turn, or the fewest whole turns that reach kAdsbFetchIntervalMs,
+// so new positions land just after the beam passes north. Sweep off: kAdsbFetchIntervalMs.
+unsigned long fetchIntervalMs() {
+  if (!ui::settings::isRadarSweepEnabled()) {
+    return config::kAdsbFetchIntervalMs;
+  }
+  const unsigned long turn_ms = static_cast<unsigned long>(ui::settings::getSweepRotationSpeedMs());
+  if (turn_ms == 0) {
+    return config::kAdsbFetchIntervalMs;
+  }
+  const unsigned long turns = (config::kAdsbFetchIntervalMs + turn_ms - 1) / turn_ms;
+  return turns * turn_ms;
+}
 
 WifiManager wifiManager(WIFI_SSID, WIFI_PASSWORD);
 ButtonManager bootButton(0);
@@ -82,7 +99,7 @@ void onRangeTap() {
     if (!ui::settings::isVisible()) {
       ui::radarDisplayDraw();
     }
-    g_last_adsb_fetch_ms = 0; // Force immediate ADSB fetch on next loop
+    g_fetch_now = true; // fetch with the new radius as soon as allowed
   }
 }
 
@@ -162,7 +179,7 @@ void handleInput() {
         ui::screensaver::begin();  // the title corner starts the screensaver now
       } else if (ui::radarDisplayHandleTouch(s_tap_x, s_tap_y)) {
         ui::radarDisplayRefreshAircraft();
-        g_last_adsb_fetch_ms = 0;
+        g_fetch_now = true;
       }
     } else if (duration >= 600) {
       ui::settings::show();
@@ -308,19 +325,53 @@ void loop() {
         }
       }
       
-      if (millis() - g_last_adsb_fetch_ms >= config::kAdsbFetchIntervalMs) {
-        g_last_adsb_fetch_ms = millis();
-        triggerFetch();
+      // Scheduled fetch each time millis() crosses a period boundary: the sweep angle is
+      // millis() % turn, so that's when the beam passes north. A forced fetch (g_fetch_now)
+      // waits kAdsbMinFetchGapMs after the last one, and a scheduled one that comes that soon
+      // after a forced one is skipped.
+      {
+        const unsigned long now = millis();
+        const unsigned long since_last = now - g_last_adsb_fetch_ms;
+        static unsigned long s_last_period = ~0UL;
+        static bool s_fetch_due = false;
+        const unsigned long period = now / fetchIntervalMs();
+        const bool backing_off = static_cast<long>(now - g_fetch_backoff_until_ms) < 0;
+        if (period != s_last_period) {
+          s_last_period = period;
+          if (since_last >= config::kAdsbMinFetchGapMs && !backing_off) {
+            s_fetch_due = true;
+          }
+        }
+        if (g_fetch_now && since_last >= config::kAdsbMinFetchGapMs) {
+          s_fetch_due = true;
+        }
+        if (s_fetch_due && !backing_off) {
+          s_fetch_due = false;
+          g_fetch_now = false;
+          g_last_adsb_fetch_ms = now;
+          triggerFetch();
+        }
       }
-      
+
       if (g_fetch_finished) {
         g_fetch_finished = false;
         static int consecutive_failures = 0;
         if (g_fetch_success) {
           consecutive_failures = 0;
+          g_last_fetch_ok_ms = millis();
           ui::radarDisplaySetStale(false);
           if (!ui::settings::isVisible() && !ui::screensaver::isActive()) {
             ui::radarDisplayRefreshAircraft();
+          }
+        } else if (services::adsb::lastFetchRateLimited()) {
+          // Not a connection problem: skip the next period, and only call it stale if
+          // nothing has come through for a while.
+          g_fetch_backoff_until_ms = millis() + fetchIntervalMs();
+          if (millis() - g_last_fetch_ok_ms >= config::kAdsbStaleAfterMs) {
+            ui::radarDisplaySetStale(true);
+            if (!ui::settings::isVisible() && !ui::screensaver::isActive()) {
+              ui::radarDisplayRefreshAircraft();
+            }
           }
         } else {
           consecutive_failures++;

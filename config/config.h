@@ -47,8 +47,8 @@ constexpr int kDisplayHeight = TFT_HEIGHT;
 constexpr uint32_t kDisplaySpiWriteHz = 40000000;
 // GC9A01 modules often need invert + BGR for correct black/green output
 constexpr bool kDisplayInvert = true;
-#if defined(BOARD_FNK0104B) || defined(BOARD_FNK0103N)
-// FNK0104B's ILI9341 / FNK0103N's ST7796: LovyanGFX already sets the panel's colour order,
+#if defined(BOARD_FNK0104B) || defined(BOARD_FNK0104S) || defined(BOARD_FNK0103N)
+// FNK0104B's ILI9341 / FNK0104S's and FNK0103N's ST7796: LovyanGFX already sets the panel's colour order,
 // so no software R/B swap. (If red planes show blue on the FNK0103N, make this true.)
 constexpr bool kDisplayRgbOrder = false;
 #else
@@ -61,8 +61,15 @@ constexpr double kDefaultRadarLat = 33.942183;
 // constexpr double kDefaultRadarLon = 4.9041;
 constexpr double kDefaultRadarLon = -118.403560;
 
-/** Poll adsb.fi (API public limit: 1 req/s). */
-constexpr unsigned long kAdsbFetchIntervalMs = 3000;
+/** Poll adsb.fi (API public limit: ~1 req/s per IP, shared by every board on the same
+ *  connection). Fetches happen as the sweep passes north, once per turn or every few turns,
+ *  so at least this far apart (also used when the sweep is off). */
+constexpr unsigned long kAdsbFetchIntervalMs = 6000;
+/** Taps that force a fetch (range change, selecting a plane) wait this long after the last one. */
+constexpr unsigned long kAdsbMinFetchGapMs = 2000;
+/** Rate-limited (HTTP 429) fetches aren't counted as connection failures, but show
+ *  "Connection Lost" if nothing has come through for this long. */
+constexpr unsigned long kAdsbStaleAfterMs = 60000;
 /** Legacy scale unused — fetch uses radar::fetchRadiusKm() to screen edge. */
 constexpr float kAdsbFetchRadiusScale = 1.0f;
 /** false = hide aircraft with alt_baro "ground"; true = show them too. */
@@ -77,7 +84,7 @@ constexpr uint16_t kColorBlue = 0x8DBF;   // Blue (#89b4fa)
 constexpr uint16_t kTextOnYellow = 0x18E5; // Base (#1e1e2e)
 constexpr uint16_t kTextOnBlack = 0xCEBE; // Text (#cdd6f4)
 
-constexpr char kAppVersion[] = "v0.1.0";
+constexpr char kAppVersion[] = "v0.1.z";
 
 // --- NTP and Timezone Settings ---
 // Find your region's POSIX string here: https://gist.github.com/alwynallan/24d96091655391107939

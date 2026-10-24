@@ -3,6 +3,9 @@
 #define LGFX_USE_V1
 #include <LovyanGFX.hpp>
 #include "config.h"
+#if defined(ST7796_DRIVER) && defined(FT6336_TOUCH)
+#include "hardware/touch_ft6336.hpp"
+#endif
 
 class LGFX : public lgfx::LGFX_Device {
   lgfx::Bus_SPI _bus;
@@ -15,7 +18,9 @@ class LGFX : public lgfx::LGFX_Device {
 #endif
 #elif defined(ST7796_DRIVER)
   lgfx::Panel_ST7796 _panel;
-#ifdef XPT2046_SHARED_CS
+#ifdef FT6336_TOUCH
+  Touch_FT6336 _touch;  // Freenove FNK0104S (Touch_FT5x06 never detected it)
+#elif defined(XPT2046_SHARED_CS)
   lgfx::Touch_XPT2046 _touch;  // Freenove FNK0103N: on the LCD's SPI bus
 #endif
 #else
@@ -54,7 +59,11 @@ public:
 #endif
       cfg.rgb_order = false;
 #elif defined(ST7796_DRIVER)
+#ifdef TFT_INVERT
+      cfg.invert = true;  // FNK0104S
+#else
       cfg.invert = false;
+#endif
       cfg.rgb_order = false;
 #endif
       _panel.config(cfg);
@@ -68,14 +77,23 @@ public:
       _light.config(cfg);
       _panel.setLight(&_light);
     }
-#if defined(ILI9341_DRIVER) && defined(FT6336_TOUCH)
+#if defined(FT6336_TOUCH)
     {
       auto cfg = _touch.config();
+#ifdef BOARD_FNK0104S
+      // FNK0104S touch runs the same way as the LCD (checked on hardware).
+      // (Touch_FT6336 ignores pin_int and polls.)
+      cfg.x_min = 0;
+      cfg.x_max = TFT_WIDTH - 1;
+      cfg.y_min = 0;
+      cfg.y_max = TFT_HEIGHT - 1;
+#else
       // FNK0104B touch panel is mounted 180 deg from the LCD, so both axes run backwards.
       cfg.x_min = TFT_WIDTH - 1;
       cfg.x_max = 0;
       cfg.y_min = TFT_HEIGHT - 1;
       cfg.y_max = 0;
+#endif
       cfg.pin_int = TOUCH_INT;
       cfg.pin_rst = TOUCH_RST;
       cfg.bus_shared = false;

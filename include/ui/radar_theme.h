@@ -144,11 +144,11 @@ extern uint16_t kColorRunwayLine;
 
 /** Aircraft icon colors by altitude / vertical trend. */
 constexpr float kCruiseAltitudeFt = 25000.0f;
-constexpr float kHighAltitudeFt = 15000.0f;  // was 10000
+constexpr float kHighAltitudeFt = 10000.0f;
 /** |vertical rate| below this (ft/min) counts as level flight. */
 constexpr float kLevelFlightFpm = 200.0f;
 extern uint16_t kColorAltCruise;   // >= kCruiseAltitudeFt (white)
-extern uint16_t kColorAltHigh;     // >= kHighAltitudeFt (light pink)
+extern uint16_t kColorAltHigh;     // >= kHighAltitudeFt (green, same as climb, full size)
 extern uint16_t kColorAltClimb;    // below, climbing
 extern uint16_t kColorAltDescend;  // below, descending
 extern uint16_t kColorAltLevel;    // below, level / on ground / unknown

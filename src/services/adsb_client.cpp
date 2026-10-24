@@ -65,6 +65,9 @@ const Aircraft* aircraftList() { return s_aircraft; }
 
 size_t hiddenAircraftCount() { return s_hidden_count; }
 
+static volatile bool s_rate_limited = false;
+bool lastFetchRateLimited() { return s_rate_limited; }
+
 JsonDocument& filterDoc() {
   static JsonDocument filter;
   static bool initialized = false;
@@ -239,6 +242,7 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
     ESP.getFreeHeap(), heap_caps_get_largest_free_block(MALLOC_CAP_8BIT))
   HEAP(); // [0] baseline before anything
 
+  s_rate_limited = false;
   filterDoc();
   s_client.setInsecure();
 
@@ -281,31 +285,16 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
                   "User-Agent: CYD-Flight-Radar/1.0\r\n"
                   "\r\n", center_lat, center_lon, dist_nm);
 
-  const char endOfHeaders[] = "\r\n\r\n";
-  int hdrMatch = 0;
-  bool headersPassed = false;
-  unsigned long hdrTimeout = millis() + 5000;
-  
-  while (s_client.connected() || s_client.available()) {
-    if (millis() > hdrTimeout) break;
-    if (s_client.available()) {
-      int c = s_client.read();
-      if (c == endOfHeaders[hdrMatch]) {
-        hdrMatch++;
-        if (hdrMatch == 4) {
-          headersPassed = true;
-          break;
-        }
-      } else {
-        hdrMatch = (c == '\r') ? 1 : 0;
-      }
-    } else {
-      delay(1);
-    }
+  const int http_code = readHttpHeaders(s_client);
+  if (http_code == 429) {
+    // adsb.fi allows ~1 request/s per IP; several boards on one connection share that.
+    Serial.println("adsb: HTTP 429 (rate limited by adsb.fi)");
+    s_client.stop();
+    s_rate_limited = true;
+    return false;
   }
-
-  if (!headersPassed) {
-    Serial.println("adsb: failed to parse headers");
+  if (http_code != 200) {
+    Serial.printf("adsb: HTTP %d\n", http_code);
     s_client.stop();
     return false;
   }

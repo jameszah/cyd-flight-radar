@@ -12,31 +12,31 @@
             "type": "platformio-debug",
             "request": "launch",
             "name": "PIO Debug",
-            "executable": "C:/Users/james/OneDrive/Documents/ArduinoSketch/sketch/radar/.pio/build/fnk0104b/firmware.elf",
-            "projectEnvName": "fnk0104b",
-            "toolchainBinDir": "C:/Users/james/.platformio/packages/toolchain-xtensa-esp32s3/bin",
+            "executable": "C:/Users/james/OneDrive/Documents/ArduinoSketch/sketch/radar/.pio/build/fnk0103n/firmware.elf",
+            "projectEnvName": "fnk0103n",
+            "toolchainBinDir": "C:/Users/james/.platformio/packages/toolchain-xtensa-esp32/bin",
             "internalConsoleOptions": "openOnSessionStart",
             "preLaunchTask": {
                 "type": "PlatformIO",
-                "task": "Pre-Debug (fnk0104b)"
+                "task": "Pre-Debug (fnk0103n)"
             }
         },
         {
             "type": "platformio-debug",
             "request": "launch",
             "name": "PIO Debug (skip Pre-Debug)",
-            "executable": "C:/Users/james/OneDrive/Documents/ArduinoSketch/sketch/radar/.pio/build/fnk0104b/firmware.elf",
-            "projectEnvName": "fnk0104b",
-            "toolchainBinDir": "C:/Users/james/.platformio/packages/toolchain-xtensa-esp32s3/bin",
+            "executable": "C:/Users/james/OneDrive/Documents/ArduinoSketch/sketch/radar/.pio/build/fnk0103n/firmware.elf",
+            "projectEnvName": "fnk0103n",
+            "toolchainBinDir": "C:/Users/james/.platformio/packages/toolchain-xtensa-esp32/bin",
             "internalConsoleOptions": "openOnSessionStart"
         },
         {
             "type": "platformio-debug",
             "request": "launch",
             "name": "PIO Debug (without uploading)",
-            "executable": "C:/Users/james/OneDrive/Documents/ArduinoSketch/sketch/radar/.pio/build/fnk0104b/firmware.elf",
-            "projectEnvName": "fnk0104b",
-            "toolchainBinDir": "C:/Users/james/.platformio/packages/toolchain-xtensa-esp32s3/bin",
+            "executable": "C:/Users/james/OneDrive/Documents/ArduinoSketch/sketch/radar/.pio/build/fnk0103n/firmware.elf",
+            "projectEnvName": "fnk0103n",
+            "toolchainBinDir": "C:/Users/james/.platformio/packages/toolchain-xtensa-esp32/bin",
             "internalConsoleOptions": "openOnSessionStart",
             "loadMode": "manual"
         }

@@ -46,7 +46,7 @@
  *=========================*/
 
 /*1: use custom malloc/free, 0: use the built-in `lv_mem_alloc()` and `lv_mem_free()`*/
-#if defined(BOARD_FNK0103N) || defined(BOARD_FNK0104B)
+#if defined(BOARD_FNK0103N) || defined(BOARD_FNK0104B) || defined(BOARD_FNK0104S)
 /* No PSRAM: a permanent 24 KB pool for the settings menu leaves TLS short of heap.
  * On the FNK0104B the settings list (with the lat/lon/Wi-Fi rows) also outgrew 24 KB and
  * hit LV_ASSERT_HANDLER's while(1) on open. */
