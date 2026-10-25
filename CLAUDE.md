@@ -79,7 +79,8 @@ board with the env switcher in the VS Code status bar or `-e`.
 - Trainer icon: `utils::adsb::isTrainerType` (C150/152/162/172, P28A/P28R, PA38, DV20, DA40/42, SR20;
   owner's local school flies C172 + P28A) sets `Aircraft::is_trainer`; `drawPlaneIcon(..., trainer)`
   draws straight wings + straight tail plane (`kTrainer*` in `radar_theme.h`) instead of swept. Colour and
-  size rules unchanged. Not in the legend (no room above "25k" before the outer ring). Not yet seen on hardware.
+  size rules unchanged. Trainers get no radar tag (no type / callsign; `drawAircraft` skips
+  `drawAircraftTag`), still listed and tappable. Not in the legend (no room above "25k" before the outer ring). Not yet seen on hardware.
   Ideas discussed, not built: arriving/departing from runway alignment + vrate, circling from accumulated
   heading change (trail too short at 3 s sweeps), `category`/`squawk`/`ownOp` fields, airport elevation.
 
@@ -198,6 +199,11 @@ board with the env switcher in the VS Code status bar or `-e`.
   `kBannerH` px while "Connection Lost" is up.
 - `radarDisplayDraw` clears the screen with `downsampleColor(kColorBackground)` when the RGB332 sprite is in
   use (it used the full-colour background, so strips nothing redrew, like the old footer row, were a shade off).
+
+## Clock reads (all boards)
+- Never use `getLocalTime(&tm, 0)`: if `millis()` ticks between its start and its loop check it returns
+  false without reading the clock (the corner time blinked to `--:--`). Use `utils::time::localTimeNow`
+  (`include/utils_time.h`, `time()` + `localtime_r`). Not yet seen on hardware.
 
 ## Not yet verified on hardware
 - Range-label tap (just re-enabled) and the airport label placement.

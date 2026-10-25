@@ -18,6 +18,7 @@
 #include "ui/screensaver.h"
 #include "ui/status_screens.h"
 #include "ui/settings_menu.h"
+#include "utils_time.h"
 
 namespace {
 
@@ -72,7 +73,7 @@ void updateBrightness() {
 
     if (millis() - s_last_time_check > 5000) {
       s_last_time_check = millis();
-      s_time_valid = getLocalTime(&s_timeinfo, 0);
+      s_time_valid = utils::time::localTimeNow(&s_timeinfo);
     }
 
     if (s_time_valid) {

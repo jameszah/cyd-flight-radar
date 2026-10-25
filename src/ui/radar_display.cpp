@@ -18,6 +18,7 @@
 #include "ui/runway_overlay.h"
 #include "ui/settings_menu.h"
 #include "utils_math.h"
+#include "utils_time.h"
 
 
 
@@ -664,8 +665,12 @@ void drawAircraft() {
                     isHighAltitude(planes[i]), planes[i].is_trainer);
     }
   }
+  // Trainers get no tag: the straight-wing icon already identifies them.
   for (size_t d = 0; d < draw_count; ++d) {
     const size_t i = items[d].index;
+    if (planes[i].is_trainer) {
+      continue;
+    }
     drawAircraftTag(items[d].x, items[d].y, planes[i]);
   }
 }
@@ -844,7 +849,7 @@ void drawTitle() {
   char local_buf[12];
   char utc_buf[12];
   struct tm local_tm;
-  if (getLocalTime(&local_tm, 0)) {
+  if (utils::time::localTimeNow(&local_tm)) {
     const int hour12 = local_tm.tm_hour % 12 == 0 ? 12 : local_tm.tm_hour % 12;
     snprintf(local_buf, sizeof(local_buf), "%d:%02d %s", hour12, local_tm.tm_min,
              local_tm.tm_hour < 12 ? "AM" : "PM");
@@ -1211,7 +1216,7 @@ void drawSidePanel(uint16_t bg) {
   const uint16_t grey = lgfx::color565(120, 120, 120);
   char buf[16];
   struct tm timeinfo;
-  if (!getLocalTime(&timeinfo, 0)) {
+  if (!utils::time::localTimeNow(&timeinfo)) {
     strcpy(buf, "--:--");
   } else {
     strftime(buf, sizeof(buf), "%H:%M", &timeinfo);
@@ -1754,7 +1759,7 @@ void radarDisplayUpdateAnimation() {
   // Update clock independently of ADS-B fetches
   static int s_last_minute = -1;
   struct tm timeinfo;
-  if (getLocalTime(&timeinfo, 0)) {
+  if (utils::time::localTimeNow(&timeinfo)) {
     if (timeinfo.tm_min != s_last_minute) {
       s_last_minute = timeinfo.tm_min;
       footer_needs_update = true;
