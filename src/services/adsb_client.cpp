@@ -90,6 +90,8 @@ JsonDocument& filterDoc() {
     filter["dir"] = true;
     filter["dbFlags"] = true;
     filter["category"] = true;
+    filter["squawk"] = true;
+    filter["emergency"] = true;
     filter["desc"] = true;
     filter["r"] = true;
     initialized = true;
@@ -375,7 +377,12 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
     target_ac->is_heli = utils::adsb::isHelicopter(plane);
     target_ac->is_military = utils::adsb::isMilitary(plane);
     fillTagFields(target_ac, plane);
-    target_ac->is_trainer = utils::adsb::isTrainerType(target_ac->type);
+    target_ac->aircraft_class = utils::adsb::classifyAircraft(
+        target_ac->type,
+        plane["category"].is<const char*>() ? plane["category"].as<const char*>() : "");
+    target_ac->is_emergency = utils::adsb::isEmergency(plane);
+    utils::adsb::copyJsonStringTrimmed(plane, "squawk", target_ac->squawk,
+                                       sizeof(target_ac->squawk));
 
     float alt_ft = NAN;
     if (utils::adsb::isOnGround(plane)) {

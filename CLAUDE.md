@@ -40,8 +40,10 @@ board with the env switcher in the VS Code status bar or `-e`.
   Runways are 4px wide (was 2) in white `kColorRunwayLine` (trails keep `kColorRunway`), and
   a background-colored pass `kRunwayClearMarginPx` (5px) wider blanks rings/crosshairs around them first.
 - `src/main.cpp`: re-enabled tap-to-cycle-range on the scale label (upstream commit c1436fc had
-  disabled it; `radarDisplayIsScaleTapped` was still present). Label and tap zone are in the lower-right corner of the 240px radar square, outside the outer ring
-  (`scaleLabelAnchorX/Y`).
+  disabled it; `radarDisplayIsScaleTapped` was still present). Label is now in the upper-left corner under the lat/lon (`drawScaleLabel(top_y)`, y from
+  `drawCornerInfo`'s return; one row lower when the airport ident row is shown, where its box covers a
+  few px of the outer ring). Tap zone = the drawn label box (`s_scale_box_*`) + 16 px (8 was hit-and-miss on hardware), out to the left edge; it's checked before
+  aircraft taps. Not yet seen on hardware.
 - `README.md`: added an FNK0104B section.
 - `src/services/adsb_client.cpp` (branch `feat/route-lookup`): restored the adsbdb.com route lookup that
   upstream `aba1fc6` stubbed out. Tapping a plane queues its callsign; the next `fetchUpdate()` calls
@@ -60,9 +62,11 @@ board with the env switcher in the VS Code status bar or `-e`.
   back to the altitude change since the previous fetch. Applies to military too; helicopters stay cyan.
   A legend (`drawAltitudeLegend`, icons + labels) sits in the lower-left
   corner outside the outer ring, drawn with the static grid. `drawCenterCoordinates` writes the radar
-  center (e.g. `51.05N` / `114.07W`, 12px) in the upper-left corner (`drawCornerInfo`). When exactly
-  one airport is in range, `runway::drawAirports` skips its on-circle label and returns it, and the
-  corner shows its ident (runway color) + its lat/lon instead; `drawTitle` puts
+  center (e.g. `51.05N` / `114.07W`, 12px) in the upper-left corner (`drawCornerInfo`). When any
+  airport is in range, `runway::drawAirports` picks the biggest (any large-set airport beats medium;
+  within a set, most total in-range runway `length_m`, `LabelSet::runway_m`), skips its on-circle label
+  and returns it, and the corner shows its ident (runway color) + its lat/lon instead (was: only when
+  exactly one airport was in range; not yet seen on hardware); `drawTitle` puts
   "jameszah/cyd-flight-radar" (`kTitleText`, grid green; 10px, or 8px if it would reach the "N", which it
   does on the 240px radar: ~124 vs ~110 px free) in the upper-right, and under it local time `2:05 PM` and
   `21:05 UTC` in white at the lat/lon size (12px, `kCoordRowPx`), redrawn with every frame. On the 240px
@@ -76,13 +80,36 @@ board with the env switcher in the VS Code status bar or `-e`.
   N/S/E/W). Drawing the inside-the-ring part of their trails was tried and removed (looked
   disconnected at the ring edge on hardware). Fetch radius has its own `kFetchScreenMarginPx`
   (2; it used to share the old dot margin). Not yet seen on hardware.
-- Trainer icon: `utils::adsb::isTrainerType` (C150/152/162/172, P28A/P28R, PA38, DV20, DA40/42, SR20;
-  owner's local school flies C172 + P28A) sets `Aircraft::is_trainer`; `drawPlaneIcon(..., trainer)`
+- Trainer icon: `utils::adsb::isTrainerType` (C150/152/162/172, P28A/P28R, PA38, DV20, DA40/42, SR20; now the `kTrainer` class, see Aircraft icon classes;
+  owner's local school flies C172 + P28A); `drawPlaneIcon(..., trainer)`
   draws straight wings + straight tail plane (`kTrainer*` in `radar_theme.h`) instead of swept. Colour and
   size rules unchanged. Trainers get no radar tag (no type / callsign; `drawAircraft` skips
   `drawAircraftTag`), still listed and tappable. Not in the legend (no room above "25k" before the outer ring). Not yet seen on hardware.
   Ideas discussed, not built: arriving/departing from runway alignment + vrate, circling from accumulated
-  heading change (trail too short at 3 s sweeps), `category`/`squawk`/`ownOp` fields, airport elevation.
+  heading change (trail too short at 3 s sweeps), `ownOp` (medevac marker), airport elevation, gliders /
+  balloons / drones / ground vehicles shapes, a legend page for the classes.
+- Class legend (`drawClassLegend`, static grid) in the lower-right corner where the range label was: icons
+  pointing west on the right edge, labels to their left, bottom-up heavy / prop / jet / biz (bigger
+  icons lower, where the ring is furthest), and "mil" (narrowbody + orange marker) along the bottom edge
+  left of "heavy". All in `kColorLabel`. GA, trainer and fighter aren't in it (no room). Row heights /
+  nose / tail px are hand-set per row, `kClassLegendRowGapPx` (2) between rows; with it the top "biz" label is about at the outer ring. Not yet seen on hardware.
+
+## Aircraft icon classes (all boards)
+- `Aircraft::aircraft_class` (`services::adsb::AircraftClass`, replaces `is_trainer`) from
+  `utils::adsb::classifyAircraft(type, category)`: type lists first (trainer, fighter, heavy quad, heavy,
+  bizjet, turboprop, light GA; entries ending in `*` are prefixes, order matters: "C1*"/"C2*" light GA comes
+  after C130/C25x/C208), then adsb.fi `category` (A5 heavy, A6 fighter, A1/B1/B4 light GA), else narrowbody.
+- Shapes in `drawPlaneIcon(..., cls, military)` (constants `kHeavy*`, `kBizjet*`, `kTurboprop*`,
+  `kFighter*` in `radar_theme.h`): narrowbody = old swept icon; heavy = same at 1.25x on any altitude, thicker
+  fuselage, 1 engine dot per wing (quad: 2); bizjet = wing set aft, rear engine dots, tail; turboprop =
+  long straight wing + forward nacelle stubs; light GA = trainer shape but tagged; fighter = filled delta.
+  Military (non-fighter) adds a 4px orange `kColorMilitary` square behind the tail. Altitude colours unchanged.
+- `isMilitary` was broken: it read `dbFlags` as a bool, but it's an int bitfield (bit 0 = military), so
+  nothing was ever flagged. Fixed; expect `[MIL]` in the info panel and markers now.
+- Emergency: `squawk` + `emergency` added to the JSON filter; 7500/7600/7700 or an `emergency` other than
+  none/lifeguard/minfuel sets `is_emergency`: 2px red ring blinking every 500 ms (only as often as frames
+  redraw), and the info panel ident gets " SQ 7700". `drawAircraftSymbol` / `aircraftIconExtentPx` are
+  shared by in-ring and beyond-ring drawing. Not yet seen on hardware.
 
 - `config/config.h`: `kDisplayRgbOrder` is false under `BOARD_FNK0104B` (it's a software R/B swap in
   `hex2rgb565` etc. meant for GC9A01 boards; on the ILI9341 it turned red planes blue).

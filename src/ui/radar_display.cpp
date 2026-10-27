@@ -43,6 +43,7 @@ uint16_t kColorCenter = hex2rgb565(0xFFFFFF);
 uint16_t kColorAircraft = hex2rgb565(0xFF0000);
 uint16_t kColorMilitary = hex2rgb565(0xFF8000);
 uint16_t kColorHelicopter = hex2rgb565(0x00FFFF);
+uint16_t kColorEmergency = hex2rgb565(0xFF0000);
 uint16_t kColorTrackVector = hex2rgb565(0xFF00FF);
 uint16_t kColorTagType = hex2rgb565(0xFFC800);
 uint16_t kColorTagAltitude = hex2rgb565(0x5AC8FF);
@@ -66,6 +67,7 @@ void updateThemeColors() {
     radar::kColorAircraft = radar::hex2rgb565(0xFF0000);
     radar::kColorMilitary = radar::hex2rgb565(0xFF8000);
     radar::kColorHelicopter = radar::hex2rgb565(0x00FFFF);
+    radar::kColorEmergency = radar::hex2rgb565(0xFF0000);
     radar::kColorTrackVector = radar::hex2rgb565(0xFF00FF);
     radar::kColorTagType = radar::hex2rgb565(0xFFC800);
     radar::kColorTagAltitude = radar::hex2rgb565(0x5AC8FF);
@@ -358,41 +360,107 @@ bool isHighAltitude(const services::adsb::Aircraft& plane) {
   return !isnan(plane.alt_ft) && plane.alt_ft >= radar::kHighAltitudeFt;
 }
 
-// Airplane silhouette: fuselage, swept wings, tail plane, all kPlane* px scaled by
-// scale. (fwd, side) is a point in the icon's frame: fwd along the heading, side to its right.
-// trainer: straight wings and tail plane (kTrainer*) instead, for flight-school types.
+// Airplane silhouette for the aircraft class, in icon units scaled by the size rule.
+// (fwd, side) is a point in the icon's frame: fwd along the heading, side to its right.
+// Narrowbody: fuselage, swept wings, tail plane. Trainer / light GA: straight wings (kTrainer*).
+// Heavy: narrowbody at kHeavyIconScale (any altitude) with engine dots. military: orange
+// square behind the tail (the fighter delta already says so, so it gets none).
 void drawPlaneIcon(int cx, int cy, float heading_deg, uint16_t color, bool full_size,
-                   bool trainer = false) {
+                   services::adsb::AircraftClass cls = services::adsb::AircraftClass::kNarrowbody,
+                   bool military = false) {
+  using services::adsb::AircraftClass;
   constexpr float kDegToRad = 0.01745329252f;
   const float rad = heading_deg * kDegToRad;
   const float sin_h = sinf(rad);
   const float cos_h = cosf(rad);
-  const float scale = full_size ? 1.0f : radar::kPlaneIconSmallScale;
+  const bool heavy = cls == AircraftClass::kHeavy || cls == AircraftClass::kHeavyQuad;
+  const float scale =
+      heavy ? radar::kHeavyIconScale : (full_size ? 1.0f : radar::kPlaneIconSmallScale);
 
-  auto px = [&](int fwd, int side) {
+  auto px = [&](float fwd, float side) {
     return cx + static_cast<int>(lroundf((sin_h * fwd + cos_h * side) * scale));
   };
-  auto py = [&](int fwd, int side) {
+  auto py = [&](float fwd, float side) {
     return cy + static_cast<int>(lroundf((-cos_h * fwd + sin_h * side) * scale));
   };
   const float half_width = std::max(1.0f, radar::kPlaneStrokeHalfWidth * scale);
-  auto stroke = [&](int f0, int s0, int f1, int s1) {
-    s_draw->drawWideLine(px(f0, s0), py(f0, s0), px(f1, s1), py(f1, s1), half_width, color);
+  auto stroke = [&](float f0, float s0, float f1, float s1, float hw) {
+    s_draw->drawWideLine(px(f0, s0), py(f0, s0), px(f1, s1), py(f1, s1), hw, color);
   };
-  if (trainer) {
-    stroke(radar::kTrainerNoseFwdPx, 0, radar::kTrainerTailFwdPx, 0);
-    stroke(radar::kTrainerWingFwdPx, -radar::kTrainerWingHalfSpanPx, radar::kTrainerWingFwdPx,
+  auto line = [&](float f0, float s0, float f1, float s1) { stroke(f0, s0, f1, s1, half_width); };
+  const float dot_r = std::max(1.0f, radar::kEngineDotRadius * scale);
+  // Engine dots, mirrored either side of the fuselage.
+  auto engines = [&](float fwd, float side) {
+    s_draw->fillSmoothCircle(px(fwd, side), py(fwd, side), dot_r, color);
+    s_draw->fillSmoothCircle(px(fwd, -side), py(fwd, -side), dot_r, color);
+  };
+
+  float tail_fwd = radar::kPlaneTailFwdPx;
+  switch (cls) {
+    case AircraftClass::kTrainer:
+    case AircraftClass::kLightGa:
+      tail_fwd = radar::kTrainerTailFwdPx;
+      line(radar::kTrainerNoseFwdPx, 0, radar::kTrainerTailFwdPx, 0);
+      line(radar::kTrainerWingFwdPx, -radar::kTrainerWingHalfSpanPx, radar::kTrainerWingFwdPx,
            radar::kTrainerWingHalfSpanPx);
-    stroke(radar::kTrainerStabFwdPx, -radar::kTrainerStabHalfSpanPx, radar::kTrainerStabFwdPx,
+      line(radar::kTrainerStabFwdPx, -radar::kTrainerStabHalfSpanPx, radar::kTrainerStabFwdPx,
            radar::kTrainerStabHalfSpanPx);
-    return;
+      break;
+    case AircraftClass::kBizjet:
+      tail_fwd = radar::kBizjetTailFwd;
+      line(radar::kBizjetNoseFwd, 0, radar::kBizjetTailFwd, 0);
+      for (int side : {-1, 1}) {
+        line(radar::kBizjetWingRootFwd, 0, radar::kBizjetWingTipFwd,
+             side * radar::kBizjetWingHalfSpan);
+        line(radar::kBizjetStabRootFwd, 0, radar::kBizjetStabTipFwd,
+             side * radar::kBizjetStabHalfSpan);
+      }
+      engines(radar::kBizjetEngineFwd, radar::kBizjetEngineSide);
+      break;
+    case AircraftClass::kTurboprop:
+      tail_fwd = radar::kTurbopropTailFwd;
+      line(radar::kTurbopropNoseFwd, 0, radar::kTurbopropTailFwd, 0);
+      line(radar::kTurbopropWingFwd, -radar::kTurbopropWingHalfSpan, radar::kTurbopropWingFwd,
+           radar::kTurbopropWingHalfSpan);
+      for (int side : {-1, 1}) {
+        line(radar::kTurbopropWingFwd, side * radar::kTurbopropNacelleSide,
+             radar::kTurbopropNacelleFwd, side * radar::kTurbopropNacelleSide);
+      }
+      line(radar::kTurbopropStabFwd, -radar::kTurbopropStabHalfSpan, radar::kTurbopropStabFwd,
+           radar::kTurbopropStabHalfSpan);
+      break;
+    case AircraftClass::kFighter:
+      s_draw->fillTriangle(px(radar::kFighterDeltaApexFwd, 0), py(radar::kFighterDeltaApexFwd, 0),
+                           px(radar::kFighterDeltaTrailFwd, -radar::kFighterDeltaHalfSpan),
+                           py(radar::kFighterDeltaTrailFwd, -radar::kFighterDeltaHalfSpan),
+                           px(radar::kFighterDeltaTrailFwd, radar::kFighterDeltaHalfSpan),
+                           py(radar::kFighterDeltaTrailFwd, radar::kFighterDeltaHalfSpan), color);
+      line(radar::kFighterNoseFwd, 0, radar::kFighterTailFwd, 0);
+      return;
+    case AircraftClass::kNarrowbody:
+    case AircraftClass::kHeavy:
+    case AircraftClass::kHeavyQuad:
+      stroke(radar::kPlaneNoseFwdPx, 0, radar::kPlaneTailFwdPx, 0,
+             heavy ? half_width * radar::kHeavyFuselageWidthMul : half_width);
+      for (int side : {-1, 1}) {
+        line(radar::kPlaneWingRootFwdPx, 0, radar::kPlaneWingTipFwdPx,
+             side * radar::kPlaneWingHalfSpanPx);
+        line(radar::kPlaneStabRootFwdPx, 0, radar::kPlaneStabTipFwdPx,
+             side * radar::kPlaneStabHalfSpanPx);
+      }
+      if (cls == AircraftClass::kHeavy) {
+        engines(radar::kHeavyEngineFwd, radar::kHeavyEngineSide);
+      } else if (cls == AircraftClass::kHeavyQuad) {
+        engines(radar::kQuadInnerEngineFwd, radar::kQuadInnerEngineSide);
+        engines(radar::kQuadOuterEngineFwd, radar::kQuadOuterEngineSide);
+      }
+      break;
   }
-  stroke(radar::kPlaneNoseFwdPx, 0, radar::kPlaneTailFwdPx, 0);
-  for (int side : {-1, 1}) {
-    stroke(radar::kPlaneWingRootFwdPx, 0, radar::kPlaneWingTipFwdPx,
-           side * radar::kPlaneWingHalfSpanPx);
-    stroke(radar::kPlaneStabRootFwdPx, 0, radar::kPlaneStabTipFwdPx,
-           side * radar::kPlaneStabHalfSpanPx);
+  if (military) {
+    const float f = tail_fwd - radar::kMilitaryMarkerBehindTail;
+    constexpr int half = radar::kMilitaryMarkerSizePx / 2;
+    s_draw->fillRect(px(f, 0) - half, py(f, 0) - half, radar::kMilitaryMarkerSizePx,
+                     radar::kMilitaryMarkerSizePx, radar::kColorMilitary);
   }
 }
 
@@ -407,6 +475,24 @@ void drawHelicopterSymbol(int cx, int cy, float heading_deg, uint16_t color) {
   const int tail_x = cx - static_cast<int>(lroundf(sin_h * radar::kAircraftNoseLenPx));
   const int tail_y = cy + static_cast<int>(lroundf(cos_h * radar::kAircraftNoseLenPx));
   s_draw->drawWideLine(cx, cy, tail_x, tail_y, radar::kAircraftTrackLineHalfWidth, color);
+}
+
+// Icon radius incl. stroke for this aircraft (beyond-ring placement, emergency ring).
+int aircraftIconExtentPx(const services::adsb::Aircraft& plane) {
+  using services::adsb::AircraftClass;
+  if (plane.is_heli) {
+    return radar::kPlaneIconExtentPx;
+  }
+  const bool full = isHighAltitude(plane);
+  switch (plane.aircraft_class) {
+    case AircraftClass::kHeavy:
+    case AircraftClass::kHeavyQuad:
+      return radar::kHeavyIconExtentPx;
+    case AircraftClass::kTurboprop:
+      return full ? radar::kTurbopropIconExtentPx : radar::kTurbopropIconSmallExtentPx;
+    default:
+      return full ? radar::kPlaneIconExtentPx : radar::kPlaneIconSmallExtentPx;
+  }
 }
 
 void drawSpeedVector(int cx, int cy, float heading_deg, float track_deg,
@@ -547,6 +633,21 @@ uint16_t aircraftAltitudeColor(const services::adsb::Aircraft& plane) {
   return radar::kColorAltLevel;
 }
 
+/** Heli symbol or class silhouette, plus the blinking red ring on an emergency squawk. */
+void drawAircraftSymbol(int x, int y, const services::adsb::Aircraft& plane) {
+  if (plane.is_heli) {
+    drawHelicopterSymbol(x, y, plane.nose_deg, radar::kColorHelicopter);
+  } else {
+    drawPlaneIcon(x, y, plane.nose_deg, aircraftAltitudeColor(plane), isHighAltitude(plane),
+                  plane.aircraft_class, plane.is_military);
+  }
+  if (plane.is_emergency && (millis() / radar::kEmergencyBlinkMs) % 2 == 0) {
+    const int r = aircraftIconExtentPx(plane) + radar::kEmergencyRingGapPx;
+    s_draw->drawCircle(x, y, r, radar::kColorEmergency);
+    s_draw->drawCircle(x, y, r + 1, radar::kColorEmergency);
+  }
+}
+
 struct AircraftDrawItem {
   size_t index = 0;
   int x = 0;
@@ -616,9 +717,7 @@ void drawAircraft() {
 
     int dot_x = 0;
     int dot_y = 0;
-    const int extent = (planes[i].is_heli || isHighAltitude(planes[i]))
-                           ? radar::kPlaneIconExtentPx
-                           : radar::kPlaneIconSmallExtentPx;
+    const int extent = aircraftIconExtentPx(planes[i]);
     if (!beyondRingEdgeDotFromLatLon(planes[i].lat, planes[i].lon, extent, &dot_x,
                                      &dot_y)) {
       continue;
@@ -630,17 +729,11 @@ void drawAircraft() {
     ++dot_count;
   }
 
-  // Beyond the outer ring: the aircraft's icon (heading, colour, size, trainer shape) on
+  // Beyond the outer ring: the aircraft's icon (heading, colour, size, class shape) on
   // the rim at its bearing; no tag, trail or vector.
   sortBeyondDotsFarFirst(dots, dot_count);
   for (size_t d = 0; d < dot_count; ++d) {
-    const services::adsb::Aircraft& plane = planes[dots[d].index];
-    if (plane.is_heli) {
-      drawHelicopterSymbol(dots[d].x, dots[d].y, plane.nose_deg, radar::kColorHelicopter);
-    } else {
-      drawPlaneIcon(dots[d].x, dots[d].y, plane.nose_deg, aircraftAltitudeColor(plane),
-                    isHighAltitude(plane), plane.is_trainer);
-    }
+    drawAircraftSymbol(dots[d].x, dots[d].y, planes[dots[d].index]);
   }
   
   s_visible_aircraft_count = draw_count + dot_count;
@@ -658,17 +751,12 @@ void drawAircraft() {
     drawFlightTrail(x, y, planes[i]);
     drawSpeedVector(x, y, planes[i].nose_deg, planes[i].track_deg,
                     planes[i].gs_knots, radar::kColorTrackVector);
-    if (planes[i].is_heli) {
-      drawHelicopterSymbol(x, y, planes[i].nose_deg, radar::kColorHelicopter);
-    } else {
-      drawPlaneIcon(x, y, planes[i].nose_deg, aircraftAltitudeColor(planes[i]),
-                    isHighAltitude(planes[i]), planes[i].is_trainer);
-    }
+    drawAircraftSymbol(x, y, planes[i]);
   }
   // Trainers get no tag: the straight-wing icon already identifies them.
   for (size_t d = 0; d < draw_count; ++d) {
     const size_t i = items[d].index;
-    if (planes[i].is_trainer) {
+    if (planes[i].aircraft_class == services::adsb::AircraftClass::kTrainer) {
       continue;
     }
     drawAircraftTag(items[d].x, items[d].y, planes[i]);
@@ -698,19 +786,27 @@ void drawCardinalLabel(const char* text, int x, int y, textdatum_t datum) {
   s_draw->drawString(text, x, y);
 }
 
+// Last drawn scale label box (frame px), for radarDisplayIsScaleTapped.
+int s_scale_box_x = 0;
+int s_scale_box_y = 0;
+int s_scale_box_w = 0;
+int s_scale_box_h = 0;
+
+// (x, y) is the label's top-left point.
 void drawScaleLabelWithBackground(const char* text, int x, int y) {
   applyScaleStyle();
-  s_draw->setTextDatum(textdatum_t::bottom_right);
+  s_draw->setTextDatum(textdatum_t::top_left);
 
   const int tw = s_draw->textWidth(text);
   const int th = s_draw->fontHeight();
   constexpr int kPadX = 3;
   constexpr int kPadY = 2;
 
-  const int left = x - tw - kPadX;
-  const int top = y - th - kPadY;
-
-  s_draw->fillRect(left, top, tw + kPadX * 2, th + kPadY * 2,
+  s_scale_box_x = x - kPadX;
+  s_scale_box_y = y - kPadY;
+  s_scale_box_w = tw + kPadX * 2;
+  s_scale_box_h = th + kPadY * 2;
+  s_draw->fillRect(s_scale_box_x, s_scale_box_y, s_scale_box_w, s_scale_box_h,
                    radar::kColorBackground);
   s_draw->setTextColor(radar::kColorGrid, radar::kColorBackground);
   s_draw->drawString(text, x, y);
@@ -758,19 +854,15 @@ void drawCardinalLabels() {
   drawCardinalLabel("E", edge - margin, cy, textdatum_t::middle_right);
 }
 
-// Scale label sits in the lower-right corner of the radar square, outside the
-// outer ring; (x, y) is the label's bottom-right point.
-constexpr int kScaleCornerMarginPx = 12;
+// Scale label sits in the upper-left corner under the lat/lon (drawCornerInfo);
+// top_y is the y below its last line.
+constexpr int kScaleLabelX = 2;
+constexpr int kScaleBelowCoordsPx = 3;
 
-int scaleLabelAnchorX() { return radar::kSize - 1 - kScaleCornerMarginPx; }
-
-int scaleLabelAnchorY() { return radar::kSize - 1 - kScaleCornerMarginPx; }
-
-void drawScaleLabel() {
+void drawScaleLabel(int top_y) {
   char scale_label[12];
   radar::formatCurrentRing3Label(scale_label, sizeof(scale_label));
-  drawScaleLabelWithBackground(scale_label, scaleLabelAnchorX(),
-                               scaleLabelAnchorY());
+  drawScaleLabelWithBackground(scale_label, kScaleLabelX, top_y + kScaleBelowCoordsPx);
 }
 
 // Altitude color legend in the lower-left corner, outside the outer ring.
@@ -803,9 +895,9 @@ constexpr int kCoordRowPx = 13;
 constexpr int kTitleTextHeightPx = 10;
 
 // Upper-left corner, outside the ring: lat/lon (2 decimals) of the radar
-// center, or, when exactly one airport is in range, its ident and lat/lon
-// (its label is then left off the radar circle).
-void drawCornerInfo(const runway::SingleAirport* airport) {
+// center, or, when any airport is in range, the biggest one's ident and lat/lon
+// (its label is then left off the radar circle). Returns the y below the last line.
+int drawCornerInfo(const runway::SingleAirport* airport) {
   const double lat = airport ? airport->lat : services::location::lat();
   const double lon = airport ? airport->lon : services::location::lon();
   char lat_buf[12];
@@ -825,6 +917,7 @@ void drawCornerInfo(const runway::SingleAirport* airport) {
   }
   s_draw->drawString(lat_buf, 2, y);
   s_draw->drawString(lon_buf, 2, y + kCoordRowPx);
+  return y + 2 * kCoordRowPx;
 }
 
 // Project URL in the upper-right corner, above the ring and right of the "N"
@@ -899,6 +992,61 @@ void drawAltitudeLegend() {
   }
 }
 
+// Aircraft class legend in the lower-right corner, outside the outer ring: a column of
+// icons on the right edge (pointing west, labels to their left), biggest at the bottom
+// where the ring is furthest away, plus "mil" along the bottom edge left of "heavy".
+// Shapes only, so all in the label colour.
+constexpr int kClassLegendGapPx = 3;  // icon nose to label right edge
+constexpr int kClassLegendRowGapPx = 2;  // between one row's wingtip and the next
+
+void drawClassLegend() {
+  using services::adsb::AircraftClass;
+  struct Row {
+    const char* text;
+    AircraftClass cls;
+    int half_h;   // half the icon's height (wingspan) at legend size
+    int nose_px;  // icon centre to nose
+    int tail_px;  // icon centre to tail, incl. stroke
+  };
+  // Bottom to top. Heavy is always drawn at kHeavyIconScale; the rest small.
+  const Row rows[] = {
+      {"heavy", AircraftClass::kHeavy, 10, 10, 9},
+      {"prop", AircraftClass::kTurboprop, 8, 5, 6},
+      {"jet", AircraftClass::kNarrowbody, 6, 6, 5},
+      {"biz", AircraftClass::kBizjet, 5, 5, 6},
+  };
+
+  static float s_vlw_size = 0.0f;
+  applyCornerTextStyle(kLegendTextHeightPx, &s_vlw_size, radar::kColorLabel);
+  s_draw->setTextDatum(textdatum_t::middle_right);
+
+  constexpr int kRows = sizeof(rows) / sizeof(rows[0]);
+  int cy = radar::kSize - 1 - rows[0].half_h;
+  for (int i = 0; i < kRows; ++i) {
+    const int cx = radar::kSize - 1 - rows[i].tail_px;
+    drawPlaneIcon(cx, cy, 270.0f, radar::kColorLabel, false, rows[i].cls);
+    s_draw->drawString(rows[i].text, cx - rows[i].nose_px - kClassLegendGapPx, cy);
+    if (i + 1 < kRows) {
+      cy -= rows[i].half_h + rows[i + 1].half_h + kClassLegendRowGapPx;
+    }
+  }
+
+  // "mil": narrowbody with the orange marker (behind its tail, to the right), left of
+  // the "heavy" label on the bottom row.
+  applyCornerTextStyle(kLegendTextHeightPx, &s_vlw_size, radar::kColorLabel);
+  s_draw->setTextDatum(textdatum_t::middle_right);
+  const int heavy_cx = radar::kSize - 1 - rows[0].tail_px;
+  const int heavy_label_left = heavy_cx - rows[0].nose_px - kClassLegendGapPx -
+                               s_draw->textWidth(rows[0].text);
+  constexpr int kMilTailPx = 10;  // tail + marker
+  constexpr int kMilNosePx = 6;
+  const int mil_cy = radar::kSize - 1 - 6;
+  const int mil_cx = heavy_label_left - 2 * kClassLegendGapPx - kMilTailPx;
+  drawPlaneIcon(mil_cx, mil_cy, 270.0f, radar::kColorLabel, false, AircraftClass::kNarrowbody,
+                true);
+  s_draw->drawString("mil", mil_cx - kMilNosePx - kClassLegendGapPx, mil_cy);
+}
+
 template <typename Gfx>
 void drawStaticGrid(Gfx& gfx) {
   initLabelMetrics();
@@ -918,9 +1066,9 @@ void drawStaticGrid(Gfx& gfx) {
       &single_airport);
   drawCenterDot(cx, cy);
   drawCardinalLabels();
-  drawScaleLabel();
   drawAltitudeLegend();
-  drawCornerInfo(has_single_airport ? &single_airport : nullptr);
+  drawClassLegend();
+  drawScaleLabel(drawCornerInfo(has_single_airport ? &single_airport : nullptr));
   drawTitle();
   gfx.setTextDatum(textdatum_t::top_left);
 }
@@ -1107,6 +1255,11 @@ int drawSelectedLines(const services::adsb::Aircraft* ac, int ly, uint16_t bg) {
     } else {
       snprintf(ident, sizeof(ident), "%s%s", ac->callsign, ac->is_military ? " [MIL]" : "");
     }
+  }
+
+  if (ac->is_emergency) {
+    const size_t len = strlen(ident);
+    snprintf(ident + len, sizeof(ident) - len, " SQ %s", ac->squawk[0] ? ac->squawk : "EMRG");
   }
 
   char kind[64];
@@ -1695,12 +1848,13 @@ bool radarDisplayIsScaleTapped(int x, int y) {
   screenToFrame(&x, &y);
   if (y >= radar::kSize) return false;
   
-  // Generous corner hit box around the bottom-right-anchored label, limited to
-  // outside the outer ring so taps on aircraft near the ring still select them.
-  const int min_x = scaleLabelAnchorX() - 60;
-  const int min_y = scaleLabelAnchorY() - 35;
-  if (x < min_x || y < min_y) return false;
-  return distSqFromCenter(x, y) > radar::kGridOuterRadius * radar::kGridOuterRadius;
+  // The label box (upper left, under the lat/lon) plus a margin for fingers, out to the
+  // screen edge on the left. Checked before aircraft taps (8 px was too small to hit
+  // reliably; this reaches a little inside the outer ring).
+  constexpr int kMarginPx = 16;
+  if (s_scale_box_w == 0) return false;
+  return x < s_scale_box_x + s_scale_box_w + kMarginPx &&
+         y >= s_scale_box_y - kMarginPx && y < s_scale_box_y + s_scale_box_h + kMarginPx;
 }
 
 bool radarDisplayIsTitleTapped(int x, int y) {

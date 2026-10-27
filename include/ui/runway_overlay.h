@@ -11,9 +11,10 @@ struct SingleAirport {
 };
 
 /**
- * Draw runways for the enabled airport sets. Airport idents are labelled on
- * the radar only when more than one airport is in range; with exactly one,
- * returns true and fills *single instead (shown in the corner by the caller).
+ * Draw runways for the enabled airport sets and label their idents on the radar,
+ * except the biggest one in range (large set first, then most runway length): that
+ * one is left off, *single is filled (shown in the corner by the caller) and it
+ * returns true. Returns false when no airport is in range.
  */
 bool drawAirports(lgfx::LGFXBase& gfx, bool large, bool medium,
                   SingleAirport* single);

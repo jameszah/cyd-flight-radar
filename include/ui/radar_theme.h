@@ -67,6 +67,55 @@ constexpr int kTrainerWingFwdPx = 2;
 constexpr int kTrainerWingHalfSpanPx = 8;
 constexpr int kTrainerStabFwdPx = -6;
 constexpr int kTrainerStabHalfSpanPx = 3;
+/** Heavy (A5 / widebody): the narrowbody shape at kHeavyIconScale (always, whatever the
+ *  altitude), fuselage kHeavyFuselageWidthMul thicker, engine dots ahead of the wing. */
+constexpr float kHeavyIconScale = 1.25f;
+constexpr float kHeavyFuselageWidthMul = 1.4f;
+constexpr float kHeavyEngineFwd = 3.0f;
+constexpr float kHeavyEngineSide = 3.5f;
+/** 747 / A380 / A340 ...: inner and outer engine per wing. */
+constexpr float kQuadInnerEngineFwd = 3.5f;
+constexpr float kQuadInnerEngineSide = 2.5f;
+constexpr float kQuadOuterEngineFwd = 2.0f;
+constexpr float kQuadOuterEngineSide = 5.0f;
+/** Engine dot radius (icon units, scaled with the icon). */
+constexpr float kEngineDotRadius = 1.2f;
+/** Bizjet: short fuselage, swept wing set aft, rear-fuselage engines, T-tail. */
+constexpr float kBizjetNoseFwd = 7.0f;
+constexpr float kBizjetTailFwd = -7.5f;
+constexpr float kBizjetWingRootFwd = 0.0f;
+constexpr float kBizjetWingTipFwd = -3.0f;
+constexpr float kBizjetWingHalfSpan = 6.0f;
+constexpr float kBizjetEngineFwd = -4.5f;
+constexpr float kBizjetEngineSide = 2.0f;
+constexpr float kBizjetStabRootFwd = -6.0f;
+constexpr float kBizjetStabTipFwd = -7.5f;
+constexpr float kBizjetStabHalfSpan = 3.5f;
+/** Turboprop (DHC-8, ATR, King Air, PC-12, C-130): long straight wing, nacelles poking forward. */
+constexpr float kTurbopropNoseFwd = 7.0f;
+constexpr float kTurbopropTailFwd = -7.0f;
+constexpr float kTurbopropWingFwd = 1.0f;
+constexpr float kTurbopropWingHalfSpan = 9.0f;
+constexpr float kTurbopropNacelleSide = 3.5f;
+constexpr float kTurbopropNacelleFwd = 4.0f;
+constexpr float kTurbopropStabFwd = -6.0f;
+constexpr float kTurbopropStabHalfSpan = 3.5f;
+/** Fighter: filled delta (apex, trailing edge, half span) plus the fuselage line. */
+constexpr float kFighterNoseFwd = 8.0f;
+constexpr float kFighterTailFwd = -6.0f;
+constexpr float kFighterDeltaApexFwd = 4.0f;
+constexpr float kFighterDeltaTrailFwd = -5.0f;
+constexpr float kFighterDeltaHalfSpan = 6.0f;
+/** Military (non-fighter shapes): filled kColorMilitary square this far behind the tail. */
+constexpr float kMilitaryMarkerBehindTail = 3.0f;
+constexpr int kMilitaryMarkerSizePx = 4;
+/** Icon radius incl. stroke for the bigger shapes (beyond-ring placement, emergency ring). */
+constexpr int kHeavyIconExtentPx = 12;
+constexpr int kTurbopropIconExtentPx = 11;
+constexpr int kTurbopropIconSmallExtentPx = 8;
+/** Emergency squawk: red ring this far outside the icon extent, on/off every kEmergencyBlinkMs. */
+constexpr int kEmergencyRingGapPx = 2;
+constexpr unsigned long kEmergencyBlinkMs = 500;
 /** drawWideLine half-width for the silhouette strokes (~2-3 px total). */
 constexpr float kPlaneStrokeHalfWidth = 1.2f;
 /** Climbing / level / descending planes (below kHighAltitudeFt) are drawn this much smaller. */
@@ -146,6 +195,7 @@ extern uint16_t kColorCenter;
 extern uint16_t kColorAircraft;
 extern uint16_t kColorMilitary;
 extern uint16_t kColorHelicopter;
+extern uint16_t kColorEmergency;  // squawk 7500/7600/7700 ring
 extern uint16_t kColorTrackVector;
 extern uint16_t kColorTagType;
 extern uint16_t kColorTagAltitude;

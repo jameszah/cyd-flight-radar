@@ -1,8 +1,21 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 
 namespace services::adsb {
+
+/** Icon class (utils::adsb::classifyAircraft): ICAO type lists first, then the ADS-B category. */
+enum class AircraftClass : uint8_t {
+  kNarrowbody,  // default swept icon (A320, 737, A220, E-jets, unknown)
+  kHeavy,       // A5 / widebody twins: bigger, an engine dot under each wing
+  kHeavyQuad,   // 747, A380, A340, C-17, ...: two engine dots per wing
+  kBizjet,      // swept wing set aft, rear engine dots, T-tail
+  kTurboprop,   // long straight wing with engine nacelles forward
+  kLightGa,     // A1 / piston singles and twins: straight wing (trainer shape), tagged
+  kTrainer,     // flight-school types: straight wing, no tag
+  kFighter,     // delta
+};
 
 /** Points kept per aircraft for the flight-path trail (was 6; TRAIL_LENGTH build flag overrides). */
 #ifdef TRAIL_LENGTH
@@ -25,8 +38,10 @@ struct Aircraft {
   char desc[32];
   bool is_heli;
   bool is_military;
-  /** Flight-school type (utils::adsb::isTrainerType): drawn with the straight-wing icon. */
-  bool is_trainer;
+  AircraftClass aircraft_class;
+  /** Squawk 7500/7600/7700 or an adsb.fi emergency status: blinking red ring. */
+  bool is_emergency;
+  char squawk[5];
 
   /** Altitude in feet (0 on ground, NAN if unknown). */
   float alt_ft;

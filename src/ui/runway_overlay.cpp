@@ -281,10 +281,13 @@ struct LabelSet {
   int max_x[kMaxAirportLabels];
   int min_y[kMaxAirportLabels];
   bool has_rw[kMaxAirportLabels];
+  uint32_t runway_m[kMaxAirportLabels];  // total length of its in-range runways ("size")
 };
 
-void drawLabels(lgfx::LGFXBase& gfx, const LabelSet& set) {
+// skip: index not to label (the one shown in the corner), or -1.
+void drawLabels(lgfx::LGFXBase& gfx, const LabelSet& set, int skip = -1) {
   for (size_t i = 0; i < set.count; ++i) {
+    if (static_cast<int>(i) == skip) continue;
     if (set.has_rw[i]) {
       const int gap = radar::kRunwayLabelGapPx;
       drawLabelUpRight(gfx, set.ident[i], set.max_x[i] + gap, set.min_y[i] - gap);
@@ -363,7 +366,20 @@ void drawAirportRunways_impl(lgfx::LGFXBase& gfx,
   int label_max_x[kMaxAirportLabels];
   int label_min_y[kMaxAirportLabels];
   bool label_has_rw[kMaxAirportLabels];
-  for (size_t j = 0; j < s_cached_airport_count; ++j) label_has_rw[j] = false;
+  uint32_t label_runway_m[kMaxAirportLabels];
+  for (size_t j = 0; j < s_cached_airport_count; ++j) {
+    label_has_rw[j] = false;
+    label_runway_m[j] = 0;
+  }
+  for (size_t i = 0; i < s_cached_runway_count; ++i) {
+    const auto& rw = runways[s_cached_runways[i]];
+    for (size_t j = 0; j < s_cached_airport_count; ++j) {
+      if (s_cached_airports[j] == rw.airport_idx) {
+        label_runway_m[j] += rw.length_m;
+        break;
+      }
+    }
+  }
 
   // Blank the grid around every runway first, so one runway's clear zone
   // never covers another runway.
@@ -403,6 +419,7 @@ void drawAirportRunways_impl(lgfx::LGFXBase& gfx,
     out->has_rw[i] = label_has_rw[i];
     out->max_x[i] = label_has_rw[i] ? label_max_x[i] : 0;
     out->min_y[i] = label_has_rw[i] ? label_min_y[i] : 0;
+    out->runway_m[i] = label_runway_m[i];
   }
   out->count = s_cached_airport_count;
 }
@@ -424,22 +441,26 @@ bool drawAirports(lgfx::LGFXBase& gfx, bool large, bool medium,
         s_med_label_pending, &s_medium);
   }
 
-  const size_t total = s_large.count + s_medium.count;
-  if (total == 1) {
-    const LabelSet& set = s_large.count == 1 ? s_large : s_medium;
-    strncpy(single->ident, set.ident[0], sizeof(single->ident) - 1);
-    single->ident[sizeof(single->ident) - 1] = '\0';
-    single->lat = e7ToDeg(set.lat_e7[0]);
-    single->lon = e7ToDeg(set.lon_e7[0]);
-    return true;
+  if (s_large.count + s_medium.count == 0) return false;
+
+  // Biggest airport: any large one beats every medium one; within a set, the most
+  // runway length in range.
+  const LabelSet& set = s_large.count > 0 ? s_large : s_medium;
+  size_t best = 0;
+  for (size_t i = 1; i < set.count; ++i) {
+    if (set.runway_m[i] > set.runway_m[best]) best = i;
   }
-  if (total == 0) return false;
+  strncpy(single->ident, set.ident[best], sizeof(single->ident) - 1);
+  single->ident[sizeof(single->ident) - 1] = '\0';
+  single->lat = e7ToDeg(set.lat_e7[best]);
+  single->lon = e7ToDeg(set.lon_e7[best]);
 
   initRunwayLabelStyle(gfx);
   applyRunwayLabelStyle(gfx);
-  drawLabels(gfx, s_large);
-  drawLabels(gfx, s_medium);
-  return false;
+  const bool best_is_large = &set == &s_large;
+  drawLabels(gfx, s_large, best_is_large ? static_cast<int>(best) : -1);
+  drawLabels(gfx, s_medium, best_is_large ? -1 : static_cast<int>(best));
+  return true;
 }
 
 }  // namespace ui::runway
