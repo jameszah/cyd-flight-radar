@@ -43,7 +43,8 @@ board with the env switcher in the VS Code status bar or `-e`.
   disabled it; `radarDisplayIsScaleTapped` was still present). Label is now in the upper-left corner under the lat/lon (`drawScaleLabel(top_y)`, y from
   `drawCornerInfo`'s return; one row lower when the airport ident row is shown, where its box covers a
   few px of the outer ring). Tap zone = the drawn label box (`s_scale_box_*`) + 16 px (8 was hit-and-miss on hardware), out to the left edge; it's checked before
-  aircraft taps. Not yet seen on hardware.
+  aircraft taps. Not yet seen on hardware. Drawn as a button: `kColorScaleButton` (0x1E8C32) rounded box,
+  black text, `kScaleLabelX` 5 so the box's left edge stays on screen.
 - `README.md`: added an FNK0104B section.
 - `src/services/adsb_client.cpp` (branch `feat/route-lookup`): restored the adsbdb.com route lookup that
   upstream `aba1fc6` stubbed out. Tapping a plane queues its callsign; the next `fetchUpdate()` calls

@@ -56,6 +56,8 @@ uint16_t kColorAltHigh = hex2rgb565(0x00FF00);
 uint16_t kColorAltClimb = hex2rgb565(0x00FF00);
 uint16_t kColorAltDescend = hex2rgb565(0xFF0000);
 uint16_t kColorAltLevel = hex2rgb565(0xFFFF00);
+// Range label button fill (text is black on it).
+uint16_t kColorScaleButton = hex2rgb565(0x1E8C32);
 
 }  // namespace radar
 
@@ -79,6 +81,7 @@ void updateThemeColors() {
     radar::kColorAltClimb = radar::hex2rgb565(0x00FF00);
     radar::kColorAltDescend = radar::hex2rgb565(0xFF0000);
     radar::kColorAltLevel = radar::hex2rgb565(0xFFFF00);
+    radar::kColorScaleButton = radar::hex2rgb565(0x1E8C32);
 }
 
 namespace {
@@ -799,16 +802,18 @@ void drawScaleLabelWithBackground(const char* text, int x, int y) {
 
   const int tw = s_draw->textWidth(text);
   const int th = s_draw->fontHeight();
-  constexpr int kPadX = 3;
+  constexpr int kPadX = 4;
   constexpr int kPadY = 2;
+  constexpr int kCornerR = 3;
 
+  // Drawn as a button: dark green rounded box, black text.
   s_scale_box_x = x - kPadX;
   s_scale_box_y = y - kPadY;
   s_scale_box_w = tw + kPadX * 2;
   s_scale_box_h = th + kPadY * 2;
-  s_draw->fillRect(s_scale_box_x, s_scale_box_y, s_scale_box_w, s_scale_box_h,
-                   radar::kColorBackground);
-  s_draw->setTextColor(radar::kColorGrid, radar::kColorBackground);
+  s_draw->fillRoundRect(s_scale_box_x, s_scale_box_y, s_scale_box_w, s_scale_box_h,
+                        kCornerR, radar::kColorScaleButton);
+  s_draw->setTextColor(TFT_BLACK, radar::kColorScaleButton);
   s_draw->drawString(text, x, y);
 }
 
@@ -856,7 +861,7 @@ void drawCardinalLabels() {
 
 // Scale label sits in the upper-left corner under the lat/lon (drawCornerInfo);
 // top_y is the y below its last line.
-constexpr int kScaleLabelX = 2;
+constexpr int kScaleLabelX = 5;  // kPadX + 1, so the button's left edge is on screen
 constexpr int kScaleBelowCoordsPx = 3;
 
 void drawScaleLabel(int top_y) {

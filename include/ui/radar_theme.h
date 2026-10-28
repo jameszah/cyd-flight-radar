@@ -191,6 +191,7 @@ constexpr uint8_t kRunwayLabelB = 200;
 extern uint16_t kColorBackground;
 extern uint16_t kColorGrid;
 extern uint16_t kColorLabel;
+extern uint16_t kColorScaleButton;
 extern uint16_t kColorCenter;
 extern uint16_t kColorAircraft;
 extern uint16_t kColorMilitary;
