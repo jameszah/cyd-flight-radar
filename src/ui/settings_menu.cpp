@@ -760,6 +760,64 @@ static void create_edit_row(lv_obj_t * parent, int field) {
     update_field_label(field);
 }
 
+// Location presets: picking one saves it like typing lat/lon in the editor.
+struct LocationPreset {
+    const char* name;
+    const char* lat;
+    const char* lon;
+};
+static const LocationPreset kLocationPresets[] = {
+    {"Windsor Castle", "51.483", "-0.604"},
+    {"LAX", "33.94", "-118.40"},
+    {"Toronto", "43.67", "-79.63"},
+    {"Calgary", "51.089", "-114.094"},
+    {"Hawaii", "21.317", "-157.920"},
+    {"Nice", "43.658", "7.216"},
+};
+static constexpr int kNumLocationPresets = sizeof(kLocationPresets) / sizeof(kLocationPresets[0]);
+
+static void location_preset_event_cb(lv_event_t * e) {
+    lv_obj_t * dd = lv_event_get_target(e);
+    const int idx = lv_dropdown_get_selected(dd);
+    if (idx < 0 || idx >= kNumLocationPresets) return;
+    if (services::location::saveFromStrings(kLocationPresets[idx].lat, kLocationPresets[idx].lon)) {
+        update_field_label(kFieldLat);
+        update_field_label(kFieldLon);
+    }
+}
+
+static void create_location_preset_row(lv_obj_t * parent) {
+    lv_obj_t * row = lv_obj_create(parent);
+    lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_size(row, LV_PCT(100), 50);
+    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_bg_color(row, get_lv_color(getCatppuccinFlavor(s_theme_flavor).mantle), 0);
+    lv_obj_set_style_border_width(row, 0, 0);
+    lv_obj_set_style_pad_all(row, 5, 0);
+    lv_obj_set_style_pad_left(row, 10, 0);
+
+    lv_obj_t * lbl = lv_label_create(row);
+    lv_label_set_text(lbl, "Preset");
+    lv_obj_set_style_text_color(lbl, get_lv_color(getCatppuccinFlavor(s_theme_flavor).text), 0);
+
+    String options;
+    for (int i = 0; i < kNumLocationPresets; ++i) {
+        if (i > 0) options += "\n";
+        options += kLocationPresets[i].name;
+    }
+    lv_obj_t * dd = lv_dropdown_create(row);
+    lv_dropdown_set_options(dd, options.c_str());
+    lv_dropdown_set_text(dd, "Choose");  // fixed text: the lat/lon rows show what's in use
+    lv_obj_set_width(dd, LV_PCT(60));
+    lv_obj_set_style_bg_color(dd, get_lv_color(getCatppuccinFlavor(s_theme_flavor).overlay), 0);
+    lv_obj_set_style_text_color(dd, get_lv_color(getCatppuccinFlavor(s_theme_flavor).text), 0);
+    lv_obj_t * dd_list = lv_dropdown_get_list(dd);
+    lv_obj_set_style_bg_color(dd_list, get_lv_color(getCatppuccinFlavor(s_theme_flavor).mantle), 0);
+    lv_obj_set_style_text_color(dd_list, get_lv_color(getCatppuccinFlavor(s_theme_flavor).text), 0);
+    lv_obj_add_event_cb(dd, location_preset_event_cb, LV_EVENT_VALUE_CHANGED, NULL);
+}
+
 static void build_ui() {
     settings_screen = lv_obj_create(NULL);
     if (!settings_screen) return;
@@ -799,7 +857,14 @@ static void build_ui() {
     lv_obj_set_scroll_dir(list, LV_DIR_VER);
     
 
-    // Settings List
+    // Settings List: Wi-Fi and location first
+    for (int field = kFieldSsid1; field <= kFieldPass2; ++field) {
+        create_edit_row(list, field);
+    }
+    create_location_preset_row(list);
+    create_edit_row(list, kFieldLat);
+    create_edit_row(list, kFieldLon);
+
     create_toggle_row(list, "Large Airports", s_show_airports, airports_switch_event_cb);
     create_toggle_row(list, "Medium Airports", s_show_medium_airports, medium_airports_switch_event_cb);
     create_toggle_row(list, "Metric Units", !ui::radar::useMiles(), units_switch_event_cb);
@@ -814,9 +879,6 @@ static void build_ui() {
     create_screensaver_row(list);
     create_range_row(list);
     create_theme_row(list);
-    for (int field = 0; field < kFieldCount; ++field) {
-        create_edit_row(list, field);
-    }
 
     // Close button
     lv_obj_t * close_btn = lv_btn_create(settings_screen);

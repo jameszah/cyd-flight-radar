@@ -120,7 +120,10 @@ board with the env switcher in the VS Code status bar or `-e`.
   were saved but never loaded; `setup()` now reads them back too.
 
 - Settings menu has text rows (`create_edit_row`, `kEditFields`) for Latitude, Longitude, WiFi 1
-  SSID/Pass, WiFi 2 SSID/Pass (passwords shown in plain text). Tapping one opens a full-screen
+  SSID/Pass, WiFi 2 SSID/Pass (passwords shown in plain text). They are the first rows of the menu:
+  Wi-Fi 1/2, then a "Preset" `lv_dropdown` (`kLocationPresets`: Windsor Castle, LAX, Toronto, Calgary, Hawaii, Nice;
+  shows fixed text "Choose", picking one saves lat/lon via `saveFromStrings`), then Latitude / Longitude.
+  Not yet seen on hardware. Tapping one opens a full-screen
   `lv_keyboard` editor (number mode for lat/lon) with Save / Cancel `lv_btn`s under the text field;
   bad lat/lon shows "Invalid ...". The keyboard's own OK / keyboard keys (CLICK_TRIG: fire on release)
   did nothing on the FNK0104B; they are still wired to the same `editor_save` / `close_editor`. Lat/lon go through `services::location::saveFromStrings` (radar re-centres on the next
