@@ -182,6 +182,16 @@ board with the env switcher in the VS Code status bar or `-e`.
 - Verified on hardware: display, colours, touch detection and direction. Heap with the 100 KB sprite and
   TLS: free ~61-104 KB, largest block ~37-49 KB during fetches.
 
+## CYD2USB (ESP32-2432S028 with ST7789, XPT2046 resistive)
+- `[env:cyd2usb]` (extends `cyd_base`): the "Cheap Yellow Display" version with micro-USB + USB-C, whose
+  2.8" 240x320 panel is an ST7789 (`cyd_28r` is the original ILI9341 one). Same pins as `cyd_28r`
+  (LCD HSPI 13/12/14, CS 15, DC 2, BL 21; touch on its own SPI: CLK 25, MOSI 32, MISO 39, CS 33, IRQ 36).
+- `lgfx::Panel_ST7789`, no `TFT_INVERT` (with it every colour was inverted on hardware: black -> light blue, green -> magenta); touch shares the `cyd_28r` XPT2046 block, but with both axes reversed (x 3900..300, y 200..3700; the
+  `cyd_28r` limits were mirrored left-right and top-bottom on hardware). `BOARD_CYD2USB` turns
+  off the software R/B swap and uses malloc for LVGL. Heap savers as FNK0103N (`TRAIL_LENGTH=6`,
+  `MAX_AIRCRAFT=20`, `FETCH_CORE=0`), `TOUCH_DEBUG` on. Runs on hardware; not yet checked: colours after
+  the inversion fix, touch after the axis flip).
+
 ## Screensaver (all boards)
 - `src/ui/screensaver.cpp`: matrix rain (from a pasted blocking sketch, made non-blocking:
   `begin/tick/end`, ticked from `loop()` every `kScreensaverFrameMs` (50), straight to `tft`).

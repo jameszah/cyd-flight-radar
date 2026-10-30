@@ -16,6 +16,9 @@ class LGFX : public lgfx::LGFX_Device {
 #else
   lgfx::Touch_XPT2046 _touch;
 #endif
+#elif defined(ST7789_DRIVER)
+  lgfx::Panel_ST7789 _panel;  // ESP32-2432S028 "CYD2USB" (micro-USB + USB-C version)
+  lgfx::Touch_XPT2046 _touch;
 #elif defined(ST7796_DRIVER)
   lgfx::Panel_ST7796 _panel;
 #ifdef FT6336_TOUCH
@@ -52,6 +55,13 @@ public:
       cfg.panel_width = TFT_WIDTH;
       cfg.panel_height = TFT_HEIGHT;
 #ifdef ILI9341_DRIVER
+#ifdef TFT_INVERT
+      cfg.invert = true;
+#else
+      cfg.invert = false;
+#endif
+      cfg.rgb_order = false;
+#elif defined(ST7789_DRIVER)
 #ifdef TFT_INVERT
       cfg.invert = true;
 #else
@@ -106,14 +116,22 @@ public:
       _touch.config(cfg);
       _panel.setTouch(&_touch);
     }
-#elif defined(ILI9341_DRIVER)
+#elif defined(ILI9341_DRIVER) || defined(ST7789_DRIVER)
     {
       auto cfg = _touch.config();
       // Typical CYD XPT2046 raw AD calibration limits
+#ifdef ST7789_DRIVER
+      // CYD2USB: both axes run the other way from the ILI9341 CYD (checked on hardware).
+      cfg.x_min      = 3900;
+      cfg.x_max      = 300;
+      cfg.y_min      = 200;
+      cfg.y_max      = 3700;
+#else
       cfg.x_min      = 300;
       cfg.x_max      = 3900;
       cfg.y_min      = 3700;
       cfg.y_max      = 200;
+#endif
       cfg.pin_int    = XPT2046_IRQ;
       cfg.bus_shared = false;
       cfg.offset_rotation = 0;
