@@ -19,6 +19,7 @@ int getMaxAltitudeFilter();
 int getSweepRotationSpeedMs();
 int getMaxAircraftLimit();
 unsigned long getScreensaverTimeoutMs();  // 0 = screensaver off
+int getScreensaverStyle();  // 0 matrix rain, 1 watch face, 2 alternate
 bool isTimezoneChanged();
 void clearTimezoneChanged();
 const char* getTimezoneStr();

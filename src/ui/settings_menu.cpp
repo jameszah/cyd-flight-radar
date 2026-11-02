@@ -296,6 +296,7 @@ static const TimezonePreset tz_presets[] = {
     {"US East", "EST5EDT,M3.2.0,M11.1.0"},
     {"US Central", "CST6CDT,M3.2.0,M11.1.0"},
     {"US Mount.", "MST7MDT,M3.2.0,M11.1.0"},
+    {"CAN Mount.", "MDT6"},
     {"US Pacific", "PST8PDT,M3.2.0,M11.1.0"},
     {"US Alaska", "AKST9AKDT,M3.2.0,M11.1.0"},
     {"US Hawaii", "HST10"},
@@ -342,7 +343,8 @@ static void ss_btn_event_cb(lv_event_t * e) {
     update_ss_label();
 }
 
-static lv_obj_t* create_screensaver_row(lv_obj_t * parent) {
+// Title above a < value > row; returns the value label.
+static lv_obj_t* create_cycle_row(lv_obj_t * parent, const char * title, lv_event_cb_t cb) {
     lv_obj_t * row = lv_obj_create(parent);
     lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_size(row, LV_PCT(100), 75);
@@ -353,7 +355,7 @@ static lv_obj_t* create_screensaver_row(lv_obj_t * parent) {
     lv_obj_set_style_pad_all(row, 10, 0);
 
     lv_obj_t * lbl = lv_label_create(row);
-    lv_label_set_text(lbl, "Screensaver");
+    lv_label_set_text(lbl, title);
     lv_obj_set_style_text_color(lbl, get_lv_color(getCatppuccinFlavor(s_theme_flavor).text), 0);
     lv_obj_set_width(lbl, LV_PCT(100));
 
@@ -368,28 +370,49 @@ static lv_obj_t* create_screensaver_row(lv_obj_t * parent) {
     lv_obj_t * btn_minus = lv_btn_create(controls);
     lv_obj_set_size(btn_minus, kArrowBtnW, kArrowBtnH);
     lv_obj_set_ext_click_area(btn_minus, kArrowBtnExtClickPx);
-    lv_obj_add_event_cb(btn_minus, ss_btn_event_cb, LV_EVENT_CLICKED, (void*)(intptr_t)-1);
+    lv_obj_add_event_cb(btn_minus, cb, LV_EVENT_CLICKED, (void*)(intptr_t)-1);
     lv_obj_set_style_bg_color(btn_minus, get_lv_color(getCatppuccinFlavor(s_theme_flavor).overlay), 0);
     lv_obj_t * lbl_minus = lv_label_create(btn_minus);
     lv_label_set_text(lbl_minus, "<");
     lv_obj_center(lbl_minus);
 
-    ss_val_label = lv_label_create(controls);
-    update_ss_label();
-    lv_obj_set_style_text_color(ss_val_label, get_lv_color(getCatppuccinFlavor(s_theme_flavor).blue), 0);
-    lv_obj_set_flex_grow(ss_val_label, 1);
-    lv_obj_set_style_text_align(ss_val_label, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_t * val_label = lv_label_create(controls);
+    lv_obj_set_style_text_color(val_label, get_lv_color(getCatppuccinFlavor(s_theme_flavor).blue), 0);
+    lv_obj_set_flex_grow(val_label, 1);
+    lv_obj_set_style_text_align(val_label, LV_TEXT_ALIGN_CENTER, 0);
 
     lv_obj_t * btn_plus = lv_btn_create(controls);
     lv_obj_set_size(btn_plus, kArrowBtnW, kArrowBtnH);
     lv_obj_set_ext_click_area(btn_plus, kArrowBtnExtClickPx);
-    lv_obj_add_event_cb(btn_plus, ss_btn_event_cb, LV_EVENT_CLICKED, (void*)(intptr_t)1);
+    lv_obj_add_event_cb(btn_plus, cb, LV_EVENT_CLICKED, (void*)(intptr_t)1);
     lv_obj_set_style_bg_color(btn_plus, get_lv_color(getCatppuccinFlavor(s_theme_flavor).overlay), 0);
     lv_obj_t * lbl_plus = lv_label_create(btn_plus);
     lv_label_set_text(lbl_plus, ">");
     lv_obj_center(lbl_plus);
 
-    return row;
+    return val_label;
+}
+
+static void create_screensaver_row(lv_obj_t * parent) {
+    ss_val_label = create_cycle_row(parent, "Screensaver", ss_btn_event_cb);
+    update_ss_label();
+}
+
+static const char * const ss_style_names[] = {"Matrix", "Watch", "Both"};
+static const int num_ss_styles = sizeof(ss_style_names)/sizeof(ss_style_names[0]);
+static int s_ss_style = config::kScreensaverDefaultStyle;
+static lv_obj_t * ss_style_val_label = nullptr;
+
+static void ss_style_btn_event_cb(lv_event_t * e) {
+    intptr_t dir = (intptr_t)lv_event_get_user_data(e);
+    s_ss_style = (s_ss_style + dir + num_ss_styles) % num_ss_styles;
+    s_prefs.putInt("ss_style", s_ss_style);
+    lv_label_set_text(ss_style_val_label, ss_style_names[s_ss_style]);
+}
+
+static void create_screensaver_style_row(lv_obj_t * parent) {
+    ss_style_val_label = create_cycle_row(parent, "Saver Style", ss_style_btn_event_cb);
+    lv_label_set_text(ss_style_val_label, ss_style_names[s_ss_style]);
 }
 
 static lv_obj_t * range_val_label = nullptr;
@@ -877,6 +900,7 @@ static void build_ui() {
     create_slider_row(list, "Sweep Speed", 1000, 15000, s_sweep_speed, "ms", sweep_speed_slider_event_cb);
     create_timezone_row(list);
     create_screensaver_row(list);
+    create_screensaver_style_row(list);
     create_range_row(list);
     create_theme_row(list);
 
@@ -913,6 +937,8 @@ void setup() {
             break;
         }
     }
+    s_ss_style = s_prefs.getInt("ss_style", config::kScreensaverDefaultStyle);
+    if (s_ss_style < 0 || s_ss_style >= num_ss_styles) s_ss_style = config::kScreensaverDefaultStyle;
     const int ss_min = s_prefs.getInt("ss_min", config::kScreensaverDefaultMin);
     for (int i = 0; i < num_ss_presets; ++i) {
         if (ss_min == ss_presets_min[i]) {
@@ -1009,6 +1035,7 @@ int getMaxAltitudeFilter() { return s_max_altitude; }
 int getSweepRotationSpeedMs() { return s_sweep_speed; }
 int getMaxAircraftLimit() { return s_max_aircraft; }
 unsigned long getScreensaverTimeoutMs() { return ss_presets_min[s_ss_idx] * 60000UL; }
+int getScreensaverStyle() { return s_ss_style; }
 
 bool isTimezoneChanged() { return s_tz_changed; }
 void clearTimezoneChanged() { s_tz_changed = false; }

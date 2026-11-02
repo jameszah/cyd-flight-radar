@@ -201,10 +201,64 @@ board with the env switcher in the VS Code status bar or `-e`.
   ~1.8 KB) lets trails fade without changing glyphs; freed on exit. Not yet seen on hardware.
   Starts after `getScreensaverTimeoutMs()` with no touch/BOOT press, only while the radar is up and settings
   closed; backlight drops to `kScreensaverBrightness` (80; 40 hid the dark greens). Fetches keep running, radar redraws are skipped.
-  Tapping the "Flight Radar" / "CYD" title corner starts it immediately (`radarDisplayIsTitleTapped`).
+  Tapping a lower corner of the radar outside the outer ring (80 px box, `lowerCornerTapped`) starts one
+  now: lower-left (altitude legend) = calculator, lower-right (class legend) = matrix rain, upper-right (title / clock) = watch face (swapped with the calculator)
+  (`screensaver::begin(kStyleWatch / kStyleMatrix)`). Replaced the old title-corner tap. Not yet seen on hardware.
   The waking touch/press is swallowed, then `radarDisplayDraw()`. Wi-Fi state changes end it.
   Settings row "Screensaver": Off/1/5/10/30/60 min, pref `"ss_min"`, default `kScreensaverDefaultMin` = 1
   (for testing; raise to 30 later).
+- Watch face (`src/ui/watch_face.cpp`): moonwatch-style chronograph, no brand names. Tachymeter bezel
+  (500..60, dot over 90; the "TACHYMETRE" word was removed), black dial with 1/5 s track, batons (short at
+  3/6/9), running seconds at 9, 30-min counter at 3, 12-h counter at 6. The chrono starts at `begin()`, so it
+  shows idle time. Hands step once a second (`updateAngles`, `beats` = 1), except the stopped chrono sweep hand, which shows the exact elapsed time; the digital timer is checked every loop (~10 ms), redrawn up to 20x a second; adsb.fi fetches stay paused while it runs. Drawn through one `tft.width()` x 16 px
+  16-bit band sprite (~8-10 KB; a full-face buffer doesn't fit beside the radar sprite on the no-PSRAM
+  boards); each frame redraws only the bands an old or new hand position covers. Face = screen width,
+  centred vertically. Off-white "panda" subdials (`kColorSubdial`) with black print and hands. Hour / minute hands white with a coloured pointer on the outer `kHandPointerFrac` (22%) of the tip: red hour (`kColorHourHand`), blue minute (`kColorMinuteHand`); chrono hand white.
+  Verified on the FNK0104S. Two fixes found on hardware: `fillSmoothCircle` on a disc much bigger than the
+  16-row sprite painted whole bands in its colour, so fills use `disc()` (row spans + blended edges over
+  a known bg colour); and `pushSprite` returns while DMA still reads the buffer, so `tft.waitDMA()` comes
+  before reusing it (without it most bands were garbled).
+- Watch face buttons under the face (below the last band, `layoutButtons`): START/STOP (green/red),
+  RESET (flyback: zero, keeps running), EXIT (back to the radar). Chrono runs from `begin()` (idle timer);
+  state `s_chrono_running` / `s_chrono_accum_ms`. While the watch face is up, touches don't wake it:
+  main sends the release to `watch_face::handleTap`, which returns true for Exit. BOOT still wakes it;
+  the matrix rain still wakes on any touch. Not yet seen on hardware.
+- Watch face strips (`setupGeometry`): the face is no longer centred. Top to bottom: time of day
+  "2:05:33 PM" + timezone abbreviation (`strftime %Z`, grey, smaller; digits in fixed cells via `drawCells`, hour always two cells, AM/PM + zone redrawn only when they change), the face bands, the interval
+  timer (chrono, "0:12:34.56", redrawn at most every 50 ms while running (hundredths step by ~5), exact when stopped; start/stop/reset are stamped at touch-down (`handleTap(x, y, press_ms)`), and a tap anywhere on the watch circle (`g.r`) is Start/Stop; white running / amber stopped; fixed-width cells (digits as wide as "8") so the decimal never moves, only changed cells redrawn, with bg colour + padding so it
+  doesn't flicker), then the buttons. Spare height goes to buttons (52), timer (40), time (36) in that
+  order; when all three full-size strips don't fit (240x320: FNK0104B, CYD2USB) it uses `kCompactStrips` (buttons 34 / timer 28 / time 26, 12pt + 9pt fonts, Font2 button labels) and shrinks the face (r 119 -> 110) until they fit. Both strips redraw only when their text changes. Not yet
+  seen on hardware.
+- adsb.fi fetches are paused while any screensaver runs (smoother animation); waking sets `g_fetch_now`.
+  Trails start over when the previous good update is older than `kTrailMaxGapMs` (30 s), so after the
+  screensaver or an outage old and new positions aren't joined by a long line. Not yet seen on hardware.
+- Owner's preference: while testing, build only the env being tested (currently `fnk0104s`), not all four.
+- `screensaver.cpp` picks the style: settings row "Saver Style" Matrix / Watch / Both (alternates on each
+  start), pref `"ss_style"`, default `kScreensaverDefaultStyle` = 0 (matrix; owner's choice for the timeout). If one can't allocate, the
+  other runs. `create_cycle_row` in `settings_menu.cpp` is the shared title + `< value >` row.
+
+## Calculator (all boards)
+- `src/ui/calculator.cpp`: tap the lower-left corner of the radar outside the outer ring (altitude legend; was the upper-right title /
+  clock corner, `radarDisplayIsAltitudeLegendTapped`, 80 px box, shares `cornerTapped` with the legend corners) to open it.
+  Draws straight to `tft`, no sprite (~0 heap; ~7 KB flash). Layout from `tft.width/height`: 10-digit
+  seven-segment LCD (+ sign cell, decimal points, unlit segments drawn in the glass colour (blank; they were faint "ghosts" before) so it never clears/flickers;
+  annunciators M / E / pending op / HEX, only lit ones drawn), then a 4x6 key grid: EXIT STO RCL M+ / CLR HEX <-(back arrow) ÷ /
+  7 8 9 × / 4 5 6 − / 1 2 3 + / 0 +/- . = (`Key::x100`/`w100` in hundredths of a column, so keys can
+  be uneven). HEX (labelled DEC in hex mode, same spot) swaps rows 2-5 for a hex pad of five 0.8-key
+  columns: C D E F NOT / 8 9 A B − / 4 5 6 7 + / 0 1 2 3 = (`Key::pad` kBoth/kDecOnly/kHexOnly; ÷ slot
+  empty) and converts the display: whole part only, sign-magnitude ("-FF"), > 0xFFFFFFFFFF = Error.
+  Hex results are truncated in `setResult`. NOT inverts within the smallest of 16/32/64 bits that holds
+  the number (64-bit results never fit 10 digits: Error); negative x gives -x-1. Ops pending from
+  decimal carry across the switch. Hex-mode digits are drawn with FreeSansBold18pt7b stretched to the
+  digit height, one per cell (`drawHexText`), so B and D are upper case; no ghost segments there, the
+  digit area is cleared each redraw (and once on the way back to segments, `s_shown_hex`). Special key ids are lower case so 'A'-'F' are digits.
+  Immediate execution, repeated "=" repeats the last op, CLR = clear entry then
+  all clear. Thousands commas: a tail under the decimal-point dot (blank when unlit). Values >= 1e10
+  or < 1e-6 show as mantissa + "E" + 2-digit exponent at the right (7 mantissa digits, 6 with a negative
+  exponent); |exp| > 99 or /0 = "Error" until CLR. State and memory survive closing.
+  Op icons are drawn with fills (no AA: the FNK0104S panel has no MISO). EXIT or BOOT closes it.
+  While open: adsb.fi fetches and radar redraws stop (`radarCovered()` in `main.cpp`), no screensaver;
+  closing forces a fetch. Built for fnk0104s only; not yet seen on hardware.
 
 ## 25 mi range (all boards)
 - 5th preset in `kRangePresets`: ring 3 = 40.2336 km (labels "25mi" / "40km"), outer ~33 mi, fetch ~32 nm.

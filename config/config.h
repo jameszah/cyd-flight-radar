@@ -70,6 +70,9 @@ constexpr unsigned long kAdsbMinFetchGapMs = 2000;
 /** Rate-limited (HTTP 429) fetches aren't counted as connection failures, but show
  *  "Connection Lost" if nothing has come through for this long. */
 constexpr unsigned long kAdsbStaleAfterMs = 60000;
+/** Flight-path trails start over when the previous update is older than this (screensaver,
+ *  outage), so old and new positions aren't joined by a long line. */
+constexpr unsigned long kTrailMaxGapMs = 30000;
 /** Legacy scale unused — fetch uses radar::fetchRadiusKm() to screen edge. */
 constexpr float kAdsbFetchRadiusScale = 1.0f;
 /** false = hide aircraft with alt_baro "ground"; true = show them too. */
@@ -110,9 +113,11 @@ constexpr char kTimezoneDefault[] = "UTC0"; // Default: UTC
 constexpr bool kRadarSweepEnabled = true;
 constexpr float kRadarSweepDurationMs = 6000.0f; // Time (ms) for one full rotation
 
-// --- Screensaver (matrix rain after no touch / BOOT press) ---
+// --- Screensaver (matrix rain or chronograph watch face after no touch / BOOT press) ---
 constexpr int kScreensaverDefaultMin = 1;        // 1 min for testing; 0 = off
 constexpr uint8_t kScreensaverBrightness = 80;   // backlight while it runs
 constexpr unsigned long kScreensaverFrameMs = 50;  // fastest streams move 1 row per frame
+constexpr unsigned long kWatchFaceFrameMs = 1000 / 6;  // 21600 bph: six beats a second
+constexpr int kScreensaverDefaultStyle = 0;      // 0 matrix, 1 watch, 2 alternate
 
 }  // namespace config

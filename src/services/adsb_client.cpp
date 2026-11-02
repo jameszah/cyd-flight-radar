@@ -66,6 +66,7 @@ const Aircraft* aircraftList() { return s_aircraft; }
 size_t hiddenAircraftCount() { return s_hidden_count; }
 
 static volatile bool s_rate_limited = false;
+static unsigned long s_last_parse_ms = 0;  // last successful update, for dropping old trails
 bool lastFetchRateLimited() { return s_rate_limited; }
 
 JsonDocument& filterDoc() {
@@ -327,6 +328,10 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
 
   size_t n = 0;
   size_t hidden = 0;
+  // After a long gap (screensaver, outage) the old trail points would join up with a long
+  // straight line, so trails start over.
+  const bool keep_trails =
+      s_last_parse_ms != 0 && millis() - s_last_parse_ms <= config::kTrailMaxGapMs;
   static char jsonStr[2048];
 
   { // Block scope
@@ -404,9 +409,11 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
     if (target_ac->hex[0] != '\0') {
       for (size_t i = 0; i < s_aircraft_count; ++i) {
         if (strcmp(s_aircraft[i].hex, target_ac->hex) == 0) {
-          target_ac->trail_size = s_aircraft[i].trail_size;
-          target_ac->trail_head = s_aircraft[i].trail_head;
-          memcpy(target_ac->trail, s_aircraft[i].trail, sizeof(target_ac->trail));
+          if (keep_trails) {
+            target_ac->trail_size = s_aircraft[i].trail_size;
+            target_ac->trail_head = s_aircraft[i].trail_head;
+            memcpy(target_ac->trail, s_aircraft[i].trail, sizeof(target_ac->trail));
+          }
           strcpy(target_ac->route_origin, s_aircraft[i].route_origin);
           strcpy(target_ac->route_destination, s_aircraft[i].route_destination);
           // No reported rate: fall back to the altitude change since the last fetch.
@@ -435,6 +442,7 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
   memcpy(s_aircraft, s_aircraft_buffer, n * sizeof(Aircraft));
   s_aircraft_count = n;
   s_hidden_count = hidden;
+  s_last_parse_ms = millis();
 
   Serial.printf("adsb: %u aircraft, %u over cap\n", static_cast<unsigned>(n),
                 static_cast<unsigned>(hidden));

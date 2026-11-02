@@ -5,6 +5,8 @@
 #include "config.h"
 #include "hardware/display.h"
 #include "hardware/display_font.h"
+#include "ui/settings_menu.h"
+#include "ui/watch_face.h"
 
 namespace ui::screensaver {
 namespace {
@@ -116,9 +118,7 @@ void glitch() {
   drawCell(col, s.y - d, kShades[shadeFor(d, s.trail)], true);
 }
 
-}  // namespace
-
-void begin() {
+bool matrixBegin() {
   s_cols = tft.width() / kCellW;
   s_rows = tft.height() / kCellH;
   s_streams = static_cast<Stream*>(malloc(s_cols * sizeof(Stream)));
@@ -128,7 +128,7 @@ void begin() {
     free(s_cells);
     s_streams = nullptr;
     s_cells = nullptr;
-    return;
+    return false;
   }
   s_active = true;
   s_last_frame_ms = 0;
@@ -146,9 +146,10 @@ void begin() {
     }
   }
   tft.endWrite();
+  return true;
 }
 
-void tick() {
+void matrixTick() {
   if (!s_active || millis() - s_last_frame_ms < config::kScreensaverFrameMs) return;
   s_last_frame_ms = millis();
 
@@ -166,7 +167,7 @@ void tick() {
   tft.endWrite();
 }
 
-void end() {
+void matrixEnd() {
   if (!s_active) return;
   s_active = false;
   free(s_streams);
@@ -176,6 +177,36 @@ void end() {
   displayFontEnsureLoaded(tft);  // radar text uses the smooth vlw font
 }
 
-bool isActive() { return s_active; }
+bool s_alternate_watch = false;  // style "Both": flips on every start
+
+}  // namespace
+
+void begin(int style) {
+  if (style == kStyleSetting) style = ui::settings::getScreensaverStyle();
+  bool watch = false;
+  switch (style) {
+    case kStyleMatrix: watch = false; break;
+    case kStyleWatch: watch = true; break;
+    default: watch = s_alternate_watch = !s_alternate_watch; break;
+  }
+  // Fall back to the other one if the first can't get its memory.
+  if (watch) {
+    if (!watch_face::begin()) matrixBegin();
+  } else {
+    if (!matrixBegin()) watch_face::begin();
+  }
+}
+
+void tick() {
+  matrixTick();
+  watch_face::tick();
+}
+
+void end() {
+  matrixEnd();
+  watch_face::end();
+}
+
+bool isActive() { return s_active || watch_face::isActive(); }
 
 }  // namespace ui::screensaver

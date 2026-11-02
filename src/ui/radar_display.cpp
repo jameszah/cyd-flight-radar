@@ -1862,16 +1862,19 @@ bool radarDisplayIsScaleTapped(int x, int y) {
          y >= s_scale_box_y - kMarginPx && y < s_scale_box_y + s_scale_box_h + kMarginPx;
 }
 
-bool radarDisplayIsTitleTapped(int x, int y) {
+// Lower corner of the radar square, outside the outer ring (so planes near the ring stay tappable).
+static bool cornerTapped(int x, int y, bool left, bool top) {
   screenToFrame(&x, &y);
   if (y >= radar::kSize) return false;
-
-  // Hit box around the URL title and the clock (drawTitle), outside the outer ring like the scale tap.
-  const int min_x = radar::kSize - 75;
-  const int max_y = 2 + kLegendRowPx + 20;
-  if (x < min_x || y > max_y) return false;
+  constexpr int kCornerPx = 80;  // covers the legends / the title and clock
+  if (top ? y >= kCornerPx : y < radar::kSize - kCornerPx) return false;
+  if (left ? x >= kCornerPx : x < radar::kSize - kCornerPx) return false;
   return distSqFromCenter(x, y) > radar::kGridOuterRadius * radar::kGridOuterRadius;
 }
+
+bool radarDisplayIsAltitudeLegendTapped(int x, int y) { return cornerTapped(x, y, true, false); }
+bool radarDisplayIsClassLegendTapped(int x, int y) { return cornerTapped(x, y, false, false); }
+bool radarDisplayIsTitleTapped(int x, int y) { return cornerTapped(x, y, false, true); }
 
 void radarDisplayDraw() {
   initPalette();

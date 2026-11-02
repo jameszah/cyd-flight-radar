@@ -15,7 +15,9 @@
 #include "secrets.h"
 #include "ui/radar_display.h"
 #include "ui/radar_range.h"
+#include "ui/calculator.h"
 #include "ui/screensaver.h"
+#include "ui/watch_face.h"
 #include "ui/status_screens.h"
 #include "ui/settings_menu.h"
 #include "utils_time.h"
@@ -104,8 +106,22 @@ void onRangeTap() {
   }
 }
 
+// Settings, a screensaver or the calculator is drawn over the radar.
+bool radarCovered() {
+  return ui::settings::isVisible() || ui::screensaver::isActive() || ui::calculator::isActive();
+}
+
+void closeCalculator() {
+  ui::calculator::end();
+  g_fetch_now = true;  // fetches were paused while it was open
+  if (g_radar_visible) {
+    ui::radarDisplayDraw();
+  }
+}
+
 void wakeFromScreensaver() {
   ui::screensaver::end();
+  g_fetch_now = true;  // fetches were paused while it ran
   if (g_radar_visible) {
     ui::radarDisplayDraw();
   }
@@ -117,6 +133,9 @@ void handleInput() {
     g_last_activity_ms = millis();
     if (ui::screensaver::isActive()) {
       wakeFromScreensaver();  // the press only wakes the screen
+      action = ButtonAction::NONE;
+    } else if (ui::calculator::isActive()) {
+      closeCalculator();  // BOOT closes the calculator
       action = ButtonAction::NONE;
     }
   }
@@ -154,7 +173,8 @@ void handleInput() {
   
   if (is_touched) {
     g_last_activity_ms = millis();
-    if (ui::screensaver::isActive()) {
+    // The watch face has its own buttons (Exit wakes it); any touch wakes the matrix rain.
+    if (ui::screensaver::isActive() && !ui::watch_face::isActive()) {
       wakeFromScreensaver();
       s_ignore_until_release = true;
     }
@@ -170,14 +190,26 @@ void handleInput() {
     unsigned long duration = millis() - s_touch_start_ms;
     if (s_ignore_until_release) {
       s_ignore_until_release = false;
+    } else if (ui::watch_face::isActive()) {
+      if (ui::watch_face::handleTap(s_tap_x, s_tap_y, s_touch_start_ms)) {
+        wakeFromScreensaver();
+      }
+    } else if (ui::calculator::isActive()) {
+      if (ui::calculator::handleTap(s_tap_x, s_tap_y)) {
+        closeCalculator();
+      }
     } else if (ui::settings::isVisible()) {
        // LVGL handles touch when visible
     } else if (duration > 40 && duration < 600) {
       // Tap the range scale label (bottom right of the radar) to cycle ranges.
       if (ui::radarDisplayIsScaleTapped(s_tap_x, s_tap_y)) {
         onRangeTap();
+      } else if (g_radar_visible && ui::radarDisplayIsAltitudeLegendTapped(s_tap_x, s_tap_y)) {
+        ui::calculator::begin();
+      } else if (g_radar_visible && ui::radarDisplayIsClassLegendTapped(s_tap_x, s_tap_y)) {
+        ui::screensaver::begin(ui::screensaver::kStyleMatrix);
       } else if (g_radar_visible && ui::radarDisplayIsTitleTapped(s_tap_x, s_tap_y)) {
-        ui::screensaver::begin();  // the title corner starts the screensaver now
+        ui::screensaver::begin(ui::screensaver::kStyleWatch);  // title corner starts the watch face
       } else if (ui::radarDisplayHandleTouch(s_tap_x, s_tap_y)) {
         ui::radarDisplayRefreshAircraft();
         g_fetch_now = true;
@@ -279,6 +311,7 @@ void loop() {
 
   if (current_state != g_last_wifi_state) {
     ui::screensaver::end();  // let the status screens / radar redraw
+    ui::calculator::end();
     g_last_activity_ms = millis();
     if (current_state == WIFI_STATE_CONNECTED) {
       configTzTime(ui::settings::getTimezoneStr(), config::kNtpServer);
@@ -310,14 +343,14 @@ void loop() {
       showRadarIfConnected();
     } else {
       const unsigned long ss_timeout_ms = ui::settings::getScreensaverTimeoutMs();
-      if (ss_timeout_ms > 0 && !ui::screensaver::isActive() && !ui::settings::isVisible() &&
+      if (ss_timeout_ms > 0 && !radarCovered() &&
           millis() - g_last_activity_ms >= ss_timeout_ms) {
         ui::screensaver::begin();
       }
 
       if (ui::screensaver::isActive()) {
         ui::screensaver::tick();
-      } else if (!ui::settings::isVisible() && g_screen_on) {
+      } else if (!radarCovered() && g_screen_on) {
         static unsigned long s_last_sweep_ms = 0;
         unsigned long interval = ui::settings::isRadarSweepEnabled() ? 50 : 1000;
         if (millis() - s_last_sweep_ms >= interval) {
@@ -330,8 +363,9 @@ void loop() {
       // millis() % turn, so that's when the beam passes north. A forced fetch (g_fetch_now)
       // waits kAdsbMinFetchGapMs after the last one, and a scheduled one that comes that soon
       // after a forced one is skipped (half a period for sweeps under 4 s, so 1-3 s sweeps
-      // still fetch every turn).
-      {
+      // still fetch every turn). Paused while the screensaver runs, so it animates smoothly,
+      // and while the calculator is open; leaving either forces a fetch.
+      if (!ui::screensaver::isActive() && !ui::calculator::isActive()) {
         const unsigned long now = millis();
         const unsigned long since_last = now - g_last_adsb_fetch_ms;
         static unsigned long s_last_period = ~0UL;
@@ -364,7 +398,7 @@ void loop() {
           consecutive_failures = 0;
           g_last_fetch_ok_ms = millis();
           ui::radarDisplaySetStale(false);
-          if (!ui::settings::isVisible() && !ui::screensaver::isActive()) {
+          if (!radarCovered()) {
             ui::radarDisplayRefreshAircraft();
           }
         } else if (services::adsb::lastFetchRateLimited()) {
@@ -373,7 +407,7 @@ void loop() {
           g_fetch_backoff_until_ms = millis() + fetchIntervalMs();
           if (millis() - g_last_fetch_ok_ms >= config::kAdsbStaleAfterMs) {
             ui::radarDisplaySetStale(true);
-            if (!ui::settings::isVisible() && !ui::screensaver::isActive()) {
+            if (!radarCovered()) {
               ui::radarDisplayRefreshAircraft();
             }
           }
@@ -381,7 +415,7 @@ void loop() {
           consecutive_failures++;
           if (consecutive_failures >= 3) {
             ui::radarDisplaySetStale(true);
-            if (!ui::settings::isVisible() && !ui::screensaver::isActive()) {
+            if (!radarCovered()) {
               ui::radarDisplayRefreshAircraft();
             }
           }
