@@ -48,6 +48,9 @@ bool displayFontEnsureLoaded(lgfx::LGFXBase& gfx) {
 }
 
 void displayFontSetSmoothSize(lgfx::LGFXBase& gfx, float size) {
+#ifdef UI_SCALE_PCT
+  size *= UI_SCALE_PCT / 100.0f;  // FNK0115: same look as the smaller boards, 1.5x
+#endif
   gfx.setTextSize(size);
 }
 

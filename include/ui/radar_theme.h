@@ -4,15 +4,27 @@
 
 namespace ui::radar {
 
-/** Radar square edge (px): RADAR_SIZE build flag, else the display width, else 240. */
+/** Radar square edge (px): RADAR_SIZE build flag, else the display's short side (the width on
+ *  portrait boards, the height on the 800x480 FNK0115), else 240. */
 #if defined(RADAR_SIZE)
 constexpr int kSize = RADAR_SIZE;
 #elif defined(TFT_WIDTH)
-constexpr int kSize = TFT_WIDTH;
+constexpr int kSize = TFT_WIDTH < TFT_HEIGHT ? TFT_WIDTH : TFT_HEIGHT;
 #else
 constexpr int kSize = 240;
 #endif
 constexpr int kCenterX = kSize / 2;
+
+/** UI_SCALE_PCT build flag (FNK0115: 150): icons, legends, corner text spacing and the smooth
+ *  font (displayFontSetSmoothSize) grow by this much, so the 480 px radar looks like the 320 px
+ *  one at 1.5x instead of tiny. 1.0 on every other board. */
+#ifdef UI_SCALE_PCT
+constexpr float kUiScale = UI_SCALE_PCT / 100.0f;
+#else
+constexpr float kUiScale = 1.0f;
+#endif
+/** px (sized for the 240-320 px radars) scaled by kUiScale, rounded. */
+constexpr int ui(int px) { return static_cast<int>(px * kUiScale + 0.5f); }
 constexpr int kCenterY = kSize / 2;
 
 /** Radar square as shown on screen: the frame sprite is scaled up to the display width when
@@ -134,17 +146,17 @@ constexpr float kAircraftTrackLengthScale = 1.5f / 5.0f;
 /** drawWideLine half-width for speed vectors (~2 px total). */
 constexpr float kAircraftTrackLineHalfWidth = 1.0f;
 
-constexpr float kRunwayLineWidthPx = 4.0f;  // was 2
+constexpr float kRunwayLineWidthPx = 4.0f * kUiScale;  // was 2
 constexpr float kRunwayLineHalfWidth = kRunwayLineWidthPx * 0.5f;
 /** Grid rings/crosshairs are blanked this far (px) either side of a runway. */
-constexpr float kRunwayClearMarginPx = 5.0f;
+constexpr float kRunwayClearMarginPx = 5.0f * kUiScale;
 constexpr int kRunwayLabelHeightPx = kCardinalLabelHeightPx;
 constexpr int kRunwayLabelGapPx = 4;
 /** Gap from triangle edge to tag block (px). */
 constexpr int kAircraftLabelGapPx = 1;
 /** Keep symbol centroid inside outer ring by at least this inset (px). */
 constexpr int kAircraftInsideRingInsetPx =
-    kAircraftNoseLenPx + kAircraftTailHalfPx + 1;
+    ui(kAircraftNoseLenPx + kAircraftTailHalfPx + 1);
 
 /** Beyond-ring traffic: plane icon just outside the outer ring at the aircraft's bearing,
  *  this many px clear of the ring (icon radius: kPlaneIconExtentPx / kPlaneIconSmallExtentPx). */
@@ -204,6 +216,8 @@ extern uint16_t kColorRunway;
 extern uint16_t kColorRunwayLabel;
 /** Runway lines (white; trails still use kColorRunway). */
 extern uint16_t kColorRunwayLine;
+/** METAR wind arrow beside the airport temperature in the upper-left corner. */
+extern uint16_t kColorWindArrow;
 
 /** Aircraft icon colors by altitude / vertical trend. */
 constexpr float kCruiseAltitudeFt = 25000.0f;

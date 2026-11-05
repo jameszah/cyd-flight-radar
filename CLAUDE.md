@@ -30,7 +30,7 @@ board with the env switcher in the VS Code status bar or `-e`.
 - `include/hardware/lgfx_config.hpp`: `FT6336_TOUCH` branch using `lgfx::Touch_FT5x06`;
   touch axes reversed (x_min=W-1..0, y_min=H-1..0) because the panel is mounted 180° from the LCD;
   `TFT_INVERT` option for ILI9341.
-- `src/ui/radar_display.cpp`: radar sweep cut from 21 lines to 7 (`kSweepLines`, `kSweepStepDeg`);
+- `src/ui/radar_display.cpp`: radar sweep cut from 21 lines to 7, now 1 on every board (`kSweepLines`; `SWEEP_LINES` overrides);
   trail drawing uses `services::adsb::kTrailLength`.
 - `include/services/adsb_client.h` / `src/services/adsb_client.cpp`: flight-path trail length is now
   `kTrailLength = 18` (was a hard-coded 6).
@@ -90,10 +90,12 @@ board with the env switcher in the VS Code status bar or `-e`.
   heading change (trail too short at 3 s sweeps), `ownOp` (medevac marker), airport elevation, gliders /
   balloons / drones / ground vehicles shapes, a legend page for the classes.
 - Class legend (`drawClassLegend`, static grid) in the lower-right corner where the range label was: icons
-  pointing west on the right edge, labels to their left, bottom-up heavy / prop / jet / biz (bigger
-  icons lower, where the ring is furthest), and "mil" (narrowbody + orange marker) along the bottom edge
-  left of "heavy". All in `kColorLabel`. GA, trainer and fighter aren't in it (no room). Row heights /
-  nose / tail px are hand-set per row, `kClassLegendRowGapPx` (2) between rows; with it the top "biz" label is about at the outer ring. Not yet seen on hardware.
+  pointing west on the right edge, labels to their left, bottom-up heavy / prop / jet / biz / mil
+  (narrowbody + orange marker), all at scale 1.0, heavy included, so "jet" matches "25k" in the altitude
+  legend (owner's request; `drawPlaneIcon`'s `scale_override` param; heavy size was tried first, too tall).
+  All in `kColorLabel`. GA, trainer and fighter aren't in it (no room). Row heights /
+  nose / tail px are hand-set per row, `kClassLegendRowGapPx` (2) between rows. On the 320 radar the
+  top "mil" label just clears the outer ring (computed); tighter on 240 boards. Not yet seen on hardware.
 
 ## Aircraft icon classes (all boards)
 - `Aircraft::aircraft_class` (`services::adsb::AircraftClass`, replaces `is_trainer`) from
@@ -144,7 +146,7 @@ board with the env switcher in the VS Code status bar or `-e`.
   uses `RADAR_SIZE=240` (heap log: largest free block ~39 KB, so a 102 KB sprite can't fit). The 240 frame
   is scaled to 320 on push (`radar::kShownSize`, `pushFrameScaled`: nearest-neighbour rows via an RGB332
   LUT; `pushRotateZoomWithAA` managed ~1 fps); touch goes through `screenToFrame`. Env also sets
-  `TFT_SPI_HZ=80000000`, `SWEEP_LINES=1`, `FETCH_CORE=0` (fetch task was pinned to core 1 with the UI).
+  `TFT_SPI_HZ=80000000`, `FETCH_CORE=0` (fetch task was pinned to core 1 with the UI).
   Heap: with 115 KB static RAM the TLS handshake failed (`SSL - Memory allocation failed`, largest free
   block ~32 KB). Env now sets `TRAIL_LENGTH=6`, `MAX_AIRCRAFT=20`, and lv_conf.h uses `LV_MEM_CUSTOM 1`
   (malloc) under `BOARD_FNK0103N`: static RAM 115.9 KB -> 76.6 KB. Verified: TLS works again.
@@ -182,6 +184,48 @@ board with the env switcher in the VS Code status bar or `-e`.
 - Verified on hardware: display, colours, touch detection and direction. Heap with the 100 KB sprite and
   TLS: free ~61-104 KB, largest block ~37-49 KB during fetches.
 
+## FNK0115Q port (ESP32-S3 N16R8, 5.0" IPS 800x480 RGB parallel, GT911 capacitive)
+- `[env:fnk0115]` (own section like fnk0104s; `qio_opi` memory type, 16 MB flash, `BOARD_HAS_PSRAM`).
+  Freenove repo `Freenove/Freenove_ESP32_S3_Display_FNK0115` covers four variants (B 4.3" TN, L 4.3" IPS,
+  N 5.0" TN with XPT2046, Q 5.0" IPS with GT911); this env is the Q. USB is a CH340C (COM port), not native.
+- Panel: `RGB_PANEL` selects a separate `LGFX` class in `lgfx_config.hpp` (`lgfx::Bus_RGB` + `Panel_RGB`,
+  framebuffer in PSRAM). Pins from Freenove's TFT_Display.h: DE 40, VSYNC 41, HSYNC 39, PCLK 42,
+  R 45/48/47/21/14, G 5/6/7/15/16/4, B 8/3/46/9/1 (Bus_RGB d0-d4 = B, d5-d10 = G, d11-d15 = R);
+  13 MHz, h/v porch 4/4/8, polarity 0, pclk_active_neg. Backlight GPIO 2 (PWM). BOOT = GPIO 0.
+- Touch: `lgfx::Touch_GT911`, SDA 19, SCL 20, INT 18, RST 38, addr 0x5D (driver also tries 0x14). Raw
+  coordinates = screen coordinates (Freenove's sketches map them 1:1), so no axis flip.
+- Landscape layout: `radar::kSize` defaults to the screen's short side (480). `radar_display.cpp` has
+  panel geometry (`kSidePanel` = width > height, `kPanelX/Top/W/H/R/Cx`, `drawPanelDivider`): on the FNK0115 the
+  panel is the 319 px strip right of the radar, full height; on portrait boards it's the same as before
+  (below the radar). `drawListLine` column x values are now relative to `kPanelX`, so `kPanelLine`
+  (sized for 320 px) fits as is. Touch: x >= `kPanelX` goes to the list; radar hit tests also reject
+  x >= `kSize`. Frame sprite (480x480 RGB332, 225 KB) is created in PSRAM (`setPsram(psramFound())`).
+- Watch face / calculator / matrix rain / settings size themselves from `tft.width/height`; the watch face
+  uses its compact strips (480 tall) centred on the 800 width. Runs on hardware: display, colours,
+  radar, list and watch face all OK (first photos), but text was far too small.
+- `UI_SCALE_PCT=150` (fnk0115 env): `radar::kUiScale` / `radar::ui(px)` in `radar_theme.h`.
+  `displayFontSetSmoothSize` multiplies every smooth-font size by it (radar labels, list, status
+  screens; watch face / calculator / LVGL don't use it). Also scaled: plane / heli icons
+  (`drawPlaneIcon` scale), icon extents, ring inset, selection ring, trail / vector widths, runway width
+  and clear margin, tag offset, scale button padding, legend and class-legend geometry, corner row
+  spacing, wind arrow, degree ring. Since 480 = 1.5 x 320, the radar should look like the FNK0104S's.
+- `PANEL_LIST_TWO_LINES` (fnk0115 env): two lines per aircraft, `kPanelLineA` flight | type | alt |
+  dist | dir (icon colour), `kPanelLineB` reg | climb | speed | description (grey), header in two lines
+  too. Selected-aircraft details use the 4-line form (one item per line), not the 4" two-column one.
+  Column widths estimated for the list font at 1.05 (0.7 x 1.5). Seen on hardware: scaled UI and list OK.
+- Pixel clock edge: LovyanGFX's `Bus_RGB` ignores `pclk_active_neg`; it sets the PCLK output edge
+  (`lcd_ck_out_edge`) from `pclk_idle_high`. With it at 0, text had green/orange fringes and the
+  rings broke into chevrons and gaps on hardware. Now `pclk_idle_high = 1` (= Freenove's PCLK_ACTIVE_NEG 1).
+- `FRAME_16BIT` (fnk0115 env): radar frame sprite is RGB565 (450 KB, PSRAM) instead of RGB332;
+  `downsampleColor` then returns the colour unchanged. Seen on hardware: clean text and rings.
+- Portrait (owner's request): `DISPLAY_ROTATION=1` in the env (3 = other way up). `TFT_WIDTH/HEIGHT`
+  stay the panel's 800x480 (LGFX panel + touch config); `config::kDisplayWidth/Height` swap to
+  480x800 for odd rotations; `displayInit` calls `setRotation(DISPLAY_ROTATION)`; touch follows the
+  rotation inside LovyanGFX. Layout = the FNK0104S one at 1.5x: radar 480 on top, one-line
+  `PANEL_LIST` below (`kPanelLine` x / pad now go through `radar::ui()`, identity on other boards).
+  `PANEL_LIST_TWO_LINES` dropped from the env (still there for landscape). Not yet seen on hardware;
+  the rotated framebuffer write may make the push slower.
+
 ## CYD2USB (ESP32-2432S028 with ST7789, XPT2046 resistive)
 - `[env:cyd2usb]` (extends `cyd_base`): the "Cheap Yellow Display" version with micro-USB + USB-C, whose
   2.8" 240x320 panel is an ST7789 (`cyd_28r` is the original ILI9341 one). Same pins as `cyd_28r`
@@ -207,25 +251,38 @@ board with the env switcher in the VS Code status bar or `-e`.
   The waking touch/press is swallowed, then `radarDisplayDraw()`. Wi-Fi state changes end it.
   Settings row "Screensaver": Off/1/5/10/30/60 min, pref `"ss_min"`, default `kScreensaverDefaultMin` = 1
   (for testing; raise to 30 later).
-- Watch face (`src/ui/watch_face.cpp`): moonwatch-style chronograph, no brand names. Tachymeter bezel
-  (500..60, dot over 90; the "TACHYMETRE" word was removed), black dial with 1/5 s track, batons (short at
-  3/6/9), running seconds at 9, 30-min counter at 3, 12-h counter at 6. The chrono starts at `begin()`, so it
-  shows idle time. Hands step once a second (`updateAngles`, `beats` = 1), except the stopped chrono sweep hand, which shows the exact elapsed time; the digital timer is checked every loop (~10 ms), redrawn up to 20x a second; adsb.fi fetches stay paused while it runs. Drawn through one `tft.width()` x 16 px
+- Watch face (`src/ui/watch_face.cpp`): moonwatch-style chronograph, no brand names. Bezel
+  (was a tachymeter 500..60, then minutes; now a 24-hour "Pepsi" GMT bezel, see below), black dial with 1/5 s track, batons (short at
+  3/6/9), running seconds at 9, 30-min counter at 3, 12-h counter at 6. The chrono is stopped at boot and
+  `begin()` no longer touches it (owner's request): it keeps running, or stays stopped, while the face is closed,
+  like the calculator keeps its value. Hands step once a second (`updateAngles`, `beats` = 1), except the stopped chrono sweep hand, which shows the exact elapsed time; the digital timer is checked every loop (~10 ms), redrawn up to 20x a second; adsb.fi fetches stay paused while it runs. Drawn through one `tft.width()` x 16 px
   16-bit band sprite (~8-10 KB; a full-face buffer doesn't fit beside the radar sprite on the no-PSRAM
   boards); each frame redraws only the bands an old or new hand position covers. Face = screen width,
-  centred vertically. Off-white "panda" subdials (`kColorSubdial`) with black print and hands. Hour / minute hands white with a coloured pointer on the outer `kHandPointerFrac` (22%) of the tip: red hour (`kColorHourHand`), blue minute (`kColorMinuteHand`); chrono hand white.
+  centred vertically. Off-white "panda" subdials (`kColorSubdial`) with black print and hands. Hands white (red / blue tips removed); hour / minute later turned gold, see below.
   Verified on the FNK0104S. Two fixes found on hardware: `fillSmoothCircle` on a disc much bigger than the
   16-row sprite painted whole bands in its colour, so fills use `disc()` (row spans + blended edges over
   a known bg colour); and `pushSprite` returns while DMA still reads the buffer, so `tft.waitDMA()` comes
   before reusing it (without it most bands were garbled).
+- "Pepsi" GMT bezel: 24-hour scale (even hours numbered, odd hours dots, triangle at 24), coloured
+  per pixel (`pepsiRing`): red `kColorBezelDay` from today's sunrise to sunset, blue `kColorBezelNight`
+  for night. `updateSunTimes` (NOAA approximate solar equations) uses `services::location` lat/lon,
+  converts to local clock hours through `localtime_r`; recomputed at `begin()` and when the local day
+  changes; serial prints `watch: sunrise ... sunset ...`; 6/18 fallback before the clock is set; polar
+  night / midnight sun = all blue / all red. New `kGmt` hand (first in `HandId`, drawn under the others):
+  thin white, red arrowhead at d*0.97, local 24-hour time. Hour / minute hands are diver-style (`diverHand`): dark edge, bright gold frame
+  (`kColorTimeHand` 255,200,40) and lume fill (`kColorLume`) from 22% out, gold tail. Hour hand (1.3x
+  width): baton, ringed circle near the tip (radius 13% of length) with three gold spokes, short point
+  beyond. Minute hand: baton with a 3x-width pointed tip. Small AA discs via `spot` (blends over
+  `readPixel`), no arrowheads (filled, open V, hollow swept were tried and removed). Central sweep hand (`kSecond`) is now the time-of-day
+  seconds; the chrono seconds moved to the subdial at 9 (`kChronoSec`, was running seconds). Checked off-board: Calgary 2026-11-04 = 7:32 / 17:07 MST. Not yet seen on hardware.
 - Watch face buttons under the face (below the last band, `layoutButtons`): START/STOP (green/red),
-  RESET (flyback: zero, keeps running), EXIT (back to the radar). Chrono runs from `begin()` (idle timer);
+  RESET (flyback: zero, keeps running), EXIT (back to the radar). Chrono persists across opens (see above);
   state `s_chrono_running` / `s_chrono_accum_ms`. While the watch face is up, touches don't wake it:
   main sends the release to `watch_face::handleTap`, which returns true for Exit. BOOT still wakes it;
   the matrix rain still wakes on any touch. Not yet seen on hardware.
 - Watch face strips (`setupGeometry`): the face is no longer centred. Top to bottom: time of day
   "2:05:33 PM" + timezone abbreviation (`strftime %Z`, grey, smaller; digits in fixed cells via `drawCells`, hour always two cells, AM/PM + zone redrawn only when they change), the face bands, the interval
-  timer (chrono, "0:12:34.56", redrawn at most every 50 ms while running (hundredths step by ~5), exact when stopped; start/stop/reset are stamped at touch-down (`handleTap(x, y, press_ms)`), and a tap anywhere on the watch circle (`g.r`) is Start/Stop; white running / amber stopped; fixed-width cells (digits as wide as "8") so the decimal never moves, only changed cells redrawn, with bg colour + padding so it
+  timer (chrono: "0:12:34.5" to tenths while running, redrawn when the tenth changes; "0:12:34.567" to the ms when stopped (owner's request; was hundredths every 50 ms); start/stop/reset are stamped at touch-down (`handleTap(x, y, press_ms)`), and a tap anywhere on the watch circle (`g.r`) is Start/Stop; white running / amber stopped; fixed-width cells (digits as wide as "8") so the decimal never moves, only changed cells redrawn, with bg colour + padding so it
   doesn't flicker), then the buttons. Spare height goes to buttons (52), timer (40), time (36) in that
   order; when all three full-size strips don't fit (240x320: FNK0104B, CYD2USB) it uses `kCompactStrips` (buttons 34 / timer 28 / time 26, 12pt + 9pt fonts, Font2 button labels) and shrinks the face (r 119 -> 110) until they fit. Both strips redraw only when their text changes. Not yet
   seen on hardware.
@@ -259,6 +316,28 @@ board with the env switcher in the VS Code status bar or `-e`.
   Op icons are drawn with fills (no AA: the FNK0104S panel has no MISO). EXIT or BOOT closes it.
   While open: adsb.fi fetches and radar redraws stop (`radarCovered()` in `main.cpp`), no screensaver;
   closing forces a fetch. Built for fnk0104s only; not yet seen on hardware.
+
+## Airport weather (all boards)
+- METAR for the "big" airport (the one `runway::drawAirports` returns): `drawStaticGrid` calls
+  `services::adsb::requestWeather(ident)` every frame; `fetchUpdate()` calls `fetchWeather` first (same
+  `s_client`, raw HTTP/1.0 to `aviationweather.gov/api/data/metar?ids=X&format=json`, filter temp/wdir/wspd)
+  when the ident changes, then every 10 min (1 min after a failure). 204 = no METAR (no display).
+  `s_weather` / `s_weather_want` are shared with the fetch core under `s_weather_mux`.
+  Serial: `metar: CYYC HTTP 200`, `metar: CYYC 9.0 C, wind 150 deg 7 kt`.
+- Upper-left corner (`drawCornerInfo`, owner's layout): top line = airport ident (runway colour) then
+  its lat/lon (radar centre lat/lon when no airport); next line (`drawWeatherRow`) = temperature (C, or F
+  when the range units are miles; degree sign is a drawn ring) and wind speed in knots ("12kt",
+  "VRB 4kt", "calm"). Wind arrow (`drawWindArrow`, slender: shaft 0.05 / head 0.18 x 0.34 of its length,
+  white, pointing downwind) in an AA ring (`kWindRingR` 15 x UI scale, 1.5 px wide) at the left edge of the
+  screen just under the weather row (centre ~(16, 45) on the 320 radar), used when that's
+  `kWindRingClearPx` (ui 4) clear of the outer ring; otherwise (240 px radars, stacked rows) the ring
+  goes off the lower right of the text, nudged clear of the outer ring, drawn with `fillArc`. No ring or
+  arrow when calm or VRB. The range button sits right under the ring, its box overlapping the ring's
+  bottom by ~2 px (owner: "touch or overlap slightly"); without a ring it's `kScaleBelowCoordsPx` = ui(8)
+  under the last text line. A 4-char label ("25mi") may touch the outer ring at its lower right.
+  Earlier spots: the 45 deg line between the radar and the corner, between / after temp and speed. If the top line would reach
+  the "N" (240 px radars) the ident, lat and lon get a line each. History: a big faint arrow over the
+  airport, a 26 px arrow below the ident row, rings between / after temp and speed. Not yet seen on hardware.
 
 ## 25 mi range (all boards)
 - 5th preset in `kRangePresets`: ring 3 = 40.2336 km (labels "25mi" / "40km"), outer ~33 mi, fetch ~32 nm.

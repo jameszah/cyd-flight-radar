@@ -3,7 +3,7 @@
 namespace ui::watch_face {
 
 // Chronograph watch face screensaver (moonwatch style). Non-blocking: call tick() from loop().
-// The chronograph starts at begin(), so its counters show how long the screen has been idle.
+// The chronograph is stopped at boot and keeps its state (running or not) while the face is closed.
 bool begin();  // false if the band sprite couldn't be allocated
 void tick();
 void end();

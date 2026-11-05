@@ -42,6 +42,16 @@ static char s_route_result_hex[7] = {0};
 static char s_route_result_origin[5] = {0};
 static char s_route_result_dest[5] = {0};
 
+// METAR for the biggest airport in range. The UI sets s_weather_want each frame and
+// reads s_weather; the fetch task (other core) fills it, so both go under the mux.
+constexpr unsigned long kWeatherRefreshMs = 10UL * 60UL * 1000UL;  // METARs are ~hourly
+constexpr unsigned long kWeatherRetryMs = 60UL * 1000UL;
+static portMUX_TYPE s_weather_mux = portMUX_INITIALIZER_UNLOCKED;
+static char s_weather_want[5] = {0};
+static Weather s_weather = {};
+static bool s_weather_valid = false;
+static char s_weather_tried_ident[5] = {0};  // fetch task only
+static unsigned long s_weather_next_ms = 0;
 
 void fillTagFields(Aircraft* ac, const JsonObject& plane) {
   utils::adsb::copyJsonStringTrimmed(plane, "hex", ac->hex, sizeof(ac->hex));
@@ -100,6 +110,18 @@ JsonDocument& filterDoc() {
   return filter;
 }
 
+JsonDocument& weatherFilterDoc() {
+  static JsonDocument filter;
+  static bool initialized = false;
+  if (!initialized) {
+    filter[0]["temp"] = true;
+    filter[0]["wdir"] = true;  // degrees, or "VRB"
+    filter[0]["wspd"] = true;
+    initialized = true;
+  }
+  return filter;
+}
+
 JsonDocument& routeFilterDoc() {
   static JsonDocument filter;
   static bool initialized = false;
@@ -116,6 +138,7 @@ JsonDocument& routeFilterDoc() {
 
 void init() {
   filterDoc();
+  weatherFilterDoc();
 #ifndef NO_ROUTE_LOOKUP
   routeFilterDoc();
 #endif
@@ -240,6 +263,63 @@ static void fetchRoute(const char* callsign, const char* hex) {
     s_client.stop();
 }
 
+/**
+ * METAR for ident from aviationweather.gov (JSON). Like fetchRoute(), it uses the
+ * shared s_client and stops it before returning. A failure is retried after
+ * kWeatherRetryMs; an airport with no METAR stores no report.
+ */
+static void fetchWeather(const char* ident) {
+    strcpy(s_weather_tried_ident, ident);
+    s_weather_next_ms = millis() + kWeatherRetryMs;
+
+    if (!s_client.connect("aviationweather.gov", 443)) {
+        Serial.println("metar: connect failed");
+        s_client.stop();
+        return;
+    }
+    s_client.printf("GET /api/data/metar?ids=%s&format=json HTTP/1.0\r\n"
+                    "Host: aviationweather.gov\r\n"
+                    "Connection: close\r\n"
+                    "User-Agent: CYD-Flight-Radar/1.0\r\n"
+                    "\r\n", ident);
+
+    const int code = readHttpHeaders(s_client);
+    Serial.printf("metar: %s HTTP %d\n", ident, code);
+    if (code == 200 || code == 204) {  // 204: no METAR for this airport
+        s_weather_next_ms = millis() + kWeatherRefreshMs;
+        Weather w = {};
+        strcpy(w.ident, ident);
+        bool have = false;
+        bool store = true;  // a parse error keeps the previous report
+        if (code == 200) {
+            JsonDocument doc;
+            DeserializationError err = deserializeJson(doc, s_client, DeserializationOption::Filter(weatherFilterDoc()));
+            if (err) {
+                Serial.printf("metar: parse error: %s\n", err.c_str());
+                s_weather_next_ms = millis() + kWeatherRetryMs;
+                store = false;
+            } else if (doc[0].is<JsonObject>()) {
+                JsonObject m = doc[0];
+                have = true;
+                w.temp_c = m["temp"].is<float>() ? m["temp"].as<float>() : NAN;
+                w.wind_kt = m["wspd"].is<float>() ? m["wspd"].as<float>() : 0.0f;
+                // "VRB" is a string; calm is wdir 0 with wspd 0.
+                w.wind_from_deg = m["wdir"].is<float>() && w.wind_kt > 0.0f
+                                      ? m["wdir"].as<float>() : NAN;
+                Serial.printf("metar: %s %.1f C, wind %.0f deg %.0f kt\n", ident, w.temp_c,
+                              w.wind_from_deg, w.wind_kt);
+            }
+        }
+        if (store) {
+            portENTER_CRITICAL(&s_weather_mux);
+            s_weather = w;
+            s_weather_valid = have;
+            portEXIT_CRITICAL(&s_weather_mux);
+        }
+    }  // doc freed before the SSL session, as in fetchUpdate()
+    s_client.stop();
+}
+
 bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
 #define HEAP() Serial.printf("heap[%s]: free=%u largest=%u\n", __func__, \
     ESP.getFreeHeap(), heap_caps_get_largest_free_block(MALLOC_CAP_8BIT))
@@ -260,6 +340,18 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
     if (strcmp(callsign, hex) != 0 && strcmp(hex, s_route_result_hex) != 0) {
       fetchRoute(callsign, hex);
       HEAP(); // [0b] after route lookup
+    }
+  }
+
+  {
+    char want[sizeof(s_weather_want)];
+    portENTER_CRITICAL(&s_weather_mux);
+    strcpy(want, s_weather_want);
+    portEXIT_CRITICAL(&s_weather_mux);
+    if (want[0] != '\0' && (strcmp(want, s_weather_tried_ident) != 0 ||
+                            static_cast<long>(millis() - s_weather_next_ms) >= 0)) {
+      fetchWeather(want);
+      HEAP(); // [0c] after METAR
     }
   }
 
@@ -471,6 +563,25 @@ void requestRouteFetch(const char* callsign, const char* hex) {
   s_route_callsign[sizeof(s_route_callsign) - 1] = '\0';
   strncpy(s_route_hex, hex, sizeof(s_route_hex) - 1);
   s_route_hex[sizeof(s_route_hex) - 1] = '\0';
+}
+
+void requestWeather(const char* ident) {
+  if (ident == nullptr) ident = "";
+  portENTER_CRITICAL(&s_weather_mux);
+  if (strncmp(s_weather_want, ident, sizeof(s_weather_want) - 1) != 0) {
+    strncpy(s_weather_want, ident, sizeof(s_weather_want) - 1);
+    s_weather_want[sizeof(s_weather_want) - 1] = '\0';
+  }
+  portEXIT_CRITICAL(&s_weather_mux);
+}
+
+bool latestWeather(Weather* out) {
+  portENTER_CRITICAL(&s_weather_mux);
+  const bool ok = s_weather_valid && s_weather_want[0] != '\0' &&
+                  strcmp(s_weather.ident, s_weather_want) == 0;
+  if (ok) *out = s_weather;
+  portEXIT_CRITICAL(&s_weather_mux);
+  return ok;
 }
 
 }  // namespace services::adsb

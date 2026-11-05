@@ -93,4 +93,21 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km);
 /** Fetch route for a specific aircraft from adsbdb.com on the next update. */
 void requestRouteFetch(const char* callsign, const char* hex);
 
+/** METAR for one airport (aviationweather.gov), fetched by fetchUpdate() on the same client. */
+struct Weather {
+  char ident[5];
+  float temp_c;        // NAN if the report has none
+  float wind_from_deg; // NAN when calm or variable
+  float wind_kt;
+};
+
+/**
+ * Airport to keep a METAR for ("" = none). Cheap to call every frame: fetchUpdate()
+ * fetches when the ident changes and then every kWeatherRefreshMs.
+ */
+void requestWeather(const char* ident);
+
+/** Latest report for the requested airport; false until one has arrived. */
+bool latestWeather(Weather* out);
+
 }  // namespace services::adsb

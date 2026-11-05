@@ -39,6 +39,11 @@ constexpr gpio_num_t kDisplayPinSclk = GPIO_NUM_4;  // display SCL
 #ifndef TFT_WIDTH
 constexpr int kDisplayWidth = 240;
 constexpr int kDisplayHeight = 240;
+#elif defined(DISPLAY_ROTATION) && (DISPLAY_ROTATION % 2 == 1)
+// Panel turned 90 deg (FNK0115 portrait): TFT_WIDTH/HEIGHT stay the panel's own 800x480,
+// the app sees 480x800.
+constexpr int kDisplayWidth = TFT_HEIGHT;
+constexpr int kDisplayHeight = TFT_WIDTH;
 #else
 constexpr int kDisplayWidth = TFT_WIDTH;
 constexpr int kDisplayHeight = TFT_HEIGHT;
@@ -47,7 +52,7 @@ constexpr int kDisplayHeight = TFT_HEIGHT;
 constexpr uint32_t kDisplaySpiWriteHz = 40000000;
 // GC9A01 modules often need invert + BGR for correct black/green output
 constexpr bool kDisplayInvert = true;
-#if defined(BOARD_FNK0104B) || defined(BOARD_FNK0104S) || defined(BOARD_FNK0103N) || defined(BOARD_CYD2USB)
+#if defined(BOARD_FNK0104B) || defined(BOARD_FNK0104S) || defined(BOARD_FNK0103N) || defined(BOARD_CYD2USB) || defined(BOARD_FNK0115)
 // FNK0104B's ILI9341 / FNK0104S's and FNK0103N's ST7796: LovyanGFX already sets the panel's colour order,
 // so no software R/B swap. (If red planes show blue on the FNK0103N, make this true.)
 constexpr bool kDisplayRgbOrder = false;
