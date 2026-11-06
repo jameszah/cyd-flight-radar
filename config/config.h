@@ -123,6 +123,6 @@ constexpr int kScreensaverDefaultMin = 1;        // 1 min for testing; 0 = off
 constexpr uint8_t kScreensaverBrightness = 80;   // backlight while it runs
 constexpr unsigned long kScreensaverFrameMs = 50;  // fastest streams move 1 row per frame
 constexpr unsigned long kWatchFaceFrameMs = 1000 / 6;  // 21600 bph: six beats a second
-constexpr int kScreensaverDefaultStyle = 0;      // 0 matrix, 1 watch, 2 alternate
+constexpr int kScreensaverDefaultStyle = 4;      // 0 matrix, 1 watch, 2 alternate, 3 Go, 4 Tron
 
 }  // namespace config

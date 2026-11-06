@@ -85,10 +85,17 @@
  *====================*/
 
 /*Default display refresh period. LVG will redraw changed areas with this period time*/
+#if defined(BOARD_FNK0115)
+/* PSRAM board with a 40-line draw buffer: redraw / read touch twice as often so scrolling the
+ * settings list keeps up with the finger. */
+#define LV_DISP_DEF_REFR_PERIOD 15      /*[ms]*/
+#define LV_INDEV_DEF_READ_PERIOD 15     /*[ms]*/
+#else
 #define LV_DISP_DEF_REFR_PERIOD 30      /*[ms]*/
 
 /*Input device read period in milliseconds*/
 #define LV_INDEV_DEF_READ_PERIOD 30     /*[ms]*/
+#endif
 
 /*Use a custom tick source that tells the elapsed time in milliseconds.
  *It removes the need to manually update the tick with `lv_tick_inc()`)*/

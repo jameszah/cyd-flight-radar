@@ -398,21 +398,68 @@ static void create_screensaver_row(lv_obj_t * parent) {
     update_ss_label();
 }
 
-static const char * const ss_style_names[] = {"Matrix", "Watch", "Both"};
-static const int num_ss_styles = sizeof(ss_style_names)/sizeof(ss_style_names[0]);
+// Saver Style dropdown. The saved value is screensaver::kStyle* (0 rain, 1 watch, 2 rain/watch
+// alternating, 3 Go, 4 Tron); the list shows them in this order instead.
+struct SaverStyleOption {
+    const char * name;
+    int style;
+};
+static const SaverStyleOption kSaverStyles[] = {
+    {"Digital Rain", 0}, {"Go", 3}, {"Tron", 4}, {"Watch", 1}, {"Rain + Watch", 2},
+};
+static const int num_ss_styles = sizeof(kSaverStyles) / sizeof(kSaverStyles[0]);
 static int s_ss_style = config::kScreensaverDefaultStyle;
-static lv_obj_t * ss_style_val_label = nullptr;
 
-static void ss_style_btn_event_cb(lv_event_t * e) {
-    intptr_t dir = (intptr_t)lv_event_get_user_data(e);
-    s_ss_style = (s_ss_style + dir + num_ss_styles) % num_ss_styles;
+static bool valid_ss_style(int style) {
+    for (const SaverStyleOption& o : kSaverStyles) {
+        if (o.style == style) return true;
+    }
+    return false;
+}
+
+static void ss_style_dropdown_event_cb(lv_event_t * e) {
+    lv_obj_t * dd = lv_event_get_target(e);
+    const int idx = lv_dropdown_get_selected(dd);
+    if (idx < 0 || idx >= num_ss_styles) return;
+    s_ss_style = kSaverStyles[idx].style;
     s_prefs.putInt("ss_style", s_ss_style);
-    lv_label_set_text(ss_style_val_label, ss_style_names[s_ss_style]);
 }
 
 static void create_screensaver_style_row(lv_obj_t * parent) {
-    ss_style_val_label = create_cycle_row(parent, "Saver Style", ss_style_btn_event_cb);
-    lv_label_set_text(ss_style_val_label, ss_style_names[s_ss_style]);
+    lv_obj_t * row = lv_obj_create(parent);
+    lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_size(row, LV_PCT(100), 50);
+    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_bg_color(row, get_lv_color(getCatppuccinFlavor(s_theme_flavor).mantle), 0);
+    lv_obj_set_style_border_width(row, 0, 0);
+    lv_obj_set_style_pad_all(row, 5, 0);
+    lv_obj_set_style_pad_left(row, 10, 0);
+
+    lv_obj_t * lbl = lv_label_create(row);
+    lv_label_set_text(lbl, "Saver Style");
+    lv_obj_set_style_text_color(lbl, get_lv_color(getCatppuccinFlavor(s_theme_flavor).text), 0);
+
+    String options;
+    int selected = 0;
+    for (int i = 0; i < num_ss_styles; ++i) {
+        if (i > 0) options += "\n";
+        options += kSaverStyles[i].name;
+        if (kSaverStyles[i].style == s_ss_style) selected = i;
+    }
+    lv_obj_t * dd = lv_dropdown_create(row);
+    lv_dropdown_set_options(dd, options.c_str());
+    lv_dropdown_set_selected(dd, selected);
+    lv_obj_set_width(dd, LV_PCT(60));
+    lv_obj_set_style_bg_color(dd, get_lv_color(getCatppuccinFlavor(s_theme_flavor).overlay), 0);
+    lv_obj_set_style_text_color(dd, get_lv_color(getCatppuccinFlavor(s_theme_flavor).text), 0);
+    lv_obj_t * dd_list = lv_dropdown_get_list(dd);
+    lv_obj_set_style_bg_color(dd_list, get_lv_color(getCatppuccinFlavor(s_theme_flavor).mantle), 0);
+    lv_obj_set_style_text_color(dd_list, get_lv_color(getCatppuccinFlavor(s_theme_flavor).text), 0);
+    // The default theme clips the list's rounded corners, which renders through a layer buffer;
+    // on the FNK0115 the bottom of the open list came out as vertical streaks.
+    lv_obj_set_style_clip_corner(dd_list, false, 0);
+    lv_obj_add_event_cb(dd, ss_style_dropdown_event_cb, LV_EVENT_VALUE_CHANGED, NULL);
 }
 
 static lv_obj_t * range_val_label = nullptr;
@@ -838,6 +885,9 @@ static void create_location_preset_row(lv_obj_t * parent) {
     lv_obj_t * dd_list = lv_dropdown_get_list(dd);
     lv_obj_set_style_bg_color(dd_list, get_lv_color(getCatppuccinFlavor(s_theme_flavor).mantle), 0);
     lv_obj_set_style_text_color(dd_list, get_lv_color(getCatppuccinFlavor(s_theme_flavor).text), 0);
+    // The default theme clips the list's rounded corners, which renders through a layer buffer;
+    // on the FNK0115 the bottom of the open list came out as vertical streaks.
+    lv_obj_set_style_clip_corner(dd_list, false, 0);
     lv_obj_add_event_cb(dd, location_preset_event_cb, LV_EVENT_VALUE_CHANGED, NULL);
 }
 
@@ -938,7 +988,7 @@ void setup() {
         }
     }
     s_ss_style = s_prefs.getInt("ss_style", config::kScreensaverDefaultStyle);
-    if (s_ss_style < 0 || s_ss_style >= num_ss_styles) s_ss_style = config::kScreensaverDefaultStyle;
+    if (!valid_ss_style(s_ss_style)) s_ss_style = config::kScreensaverDefaultStyle;
     const int ss_min = s_prefs.getInt("ss_min", config::kScreensaverDefaultMin);
     for (int i = 0; i < num_ss_presets; ++i) {
         if (ss_min == ss_presets_min[i]) {
@@ -949,9 +999,19 @@ void setup() {
 
     lv_init();
     
-    // Allocate draw buffer (reduce to 5 lines to save heap for SSL)
-    const size_t buf_size = tft.width() * 5;
-    buf1 = (lv_color_t*)malloc(buf_size * sizeof(lv_color_t));
+    // Draw buffer. Boards without PSRAM keep 5 lines to save internal heap for TLS. With PSRAM
+    // (FNK0115) the big buffers live there, so 40 lines of internal RAM are affordable; scrolling
+    // the settings list then needs ~8x fewer flushes per frame.
+    size_t buf_size = 0;
+    if (psramFound()) {
+        buf_size = tft.width() * 40;
+        buf1 = (lv_color_t*)heap_caps_malloc(buf_size * sizeof(lv_color_t),
+                                             MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    }
+    if (!buf1) {
+        buf_size = tft.width() * 5;
+        buf1 = (lv_color_t*)malloc(buf_size * sizeof(lv_color_t));
+    }
     lv_disp_draw_buf_init(&draw_buf, buf1, nullptr, buf_size);
 
     // Initialize the display

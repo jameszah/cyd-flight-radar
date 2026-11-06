@@ -15,6 +15,7 @@
 #include "secrets.h"
 #include "ui/radar_display.h"
 #include "ui/radar_range.h"
+#include "ui/block_game.h"
 #include "ui/calculator.h"
 #include "ui/screensaver.h"
 #include "ui/watch_face.h"
@@ -106,9 +107,18 @@ void onRangeTap() {
   }
 }
 
-// Settings, a screensaver or the calculator is drawn over the radar.
+// Settings, a screensaver, the calculator or the block game is drawn over the radar.
 bool radarCovered() {
-  return ui::settings::isVisible() || ui::screensaver::isActive() || ui::calculator::isActive();
+  return ui::settings::isVisible() || ui::screensaver::isActive() || ui::calculator::isActive() ||
+         ui::block_game::isActive();
+}
+
+void closeBlockGame() {
+  ui::block_game::end();
+  g_fetch_now = true;  // fetches were paused while it was open
+  if (g_radar_visible) {
+    ui::radarDisplayDraw();
+  }
 }
 
 void closeCalculator() {
@@ -136,6 +146,9 @@ void handleInput() {
       action = ButtonAction::NONE;
     } else if (ui::calculator::isActive()) {
       closeCalculator();  // BOOT closes the calculator
+      action = ButtonAction::NONE;
+    } else if (ui::block_game::isActive()) {
+      closeBlockGame();  // and the block game
       action = ButtonAction::NONE;
     }
   }
@@ -170,7 +183,18 @@ void handleInput() {
     Serial.printf("touch: x=%u y=%u (raw %d,%d)\n", tx, ty, raw.x, raw.y);
   }
 #endif
-  
+
+  // The block game reads presses and holds itself (buttons act on touch-down and repeat).
+  if (ui::block_game::isActive()) {
+    if (is_touched) g_last_activity_ms = millis();
+    if (ui::block_game::handleTouch(is_touched, tx, ty)) {
+      closeBlockGame();
+      s_ignore_until_release = is_touched;  // don't let the Exit touch reach the radar
+    }
+    s_was_touched = is_touched;
+    return;
+  }
+
   if (is_touched) {
     g_last_activity_ms = millis();
     // The watch face has its own buttons (Exit wakes it); any touch wakes the matrix rain.
@@ -207,7 +231,7 @@ void handleInput() {
       } else if (g_radar_visible && ui::radarDisplayIsAltitudeLegendTapped(s_tap_x, s_tap_y)) {
         ui::calculator::begin();
       } else if (g_radar_visible && ui::radarDisplayIsClassLegendTapped(s_tap_x, s_tap_y)) {
-        ui::screensaver::begin(ui::screensaver::kStyleMatrix);
+        ui::block_game::begin();  // class legend corner opens the block game
       } else if (g_radar_visible && ui::radarDisplayIsTitleTapped(s_tap_x, s_tap_y)) {
         ui::screensaver::begin(ui::screensaver::kStyleWatch);  // title corner starts the watch face
       } else if (ui::radarDisplayHandleTouch(s_tap_x, s_tap_y)) {
@@ -289,11 +313,13 @@ void setup() {
 
 void loop() {
   handleInput();
+  ui::block_game::tick();  // no-op unless the game is open
   wifiManager.update();
   
   bool was_settings_visible = ui::settings::isVisible();
   ui::settings::loop();
   if (was_settings_visible && !ui::settings::isVisible()) {
+    g_fetch_now = true;  // fetches were paused while it was open
     if (g_radar_visible) {
       ui::radarDisplayDraw();
     }
@@ -312,6 +338,7 @@ void loop() {
   if (current_state != g_last_wifi_state) {
     ui::screensaver::end();  // let the status screens / radar redraw
     ui::calculator::end();
+    ui::block_game::end();
     g_last_activity_ms = millis();
     if (current_state == WIFI_STATE_CONNECTED) {
       configTzTime(ui::settings::getTimezoneStr(), config::kNtpServer);
@@ -364,8 +391,10 @@ void loop() {
       // waits kAdsbMinFetchGapMs after the last one, and a scheduled one that comes that soon
       // after a forced one is skipped (half a period for sweeps under 4 s, so 1-3 s sweeps
       // still fetch every turn). Paused while the screensaver runs, so it animates smoothly,
-      // and while the calculator is open; leaving either forces a fetch.
-      if (!ui::screensaver::isActive() && !ui::calculator::isActive()) {
+      // and while the calculator, block game or settings is open (a TLS handshake on this core
+      // made the settings list stutter); leaving any of them forces a fetch.
+      if (!ui::screensaver::isActive() && !ui::calculator::isActive() &&
+          !ui::block_game::isActive() && !ui::settings::isVisible()) {
         const unsigned long now = millis();
         const unsigned long since_last = now - g_last_adsb_fetch_ms;
         static unsigned long s_last_period = ~0UL;

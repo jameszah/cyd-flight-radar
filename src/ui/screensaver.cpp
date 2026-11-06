@@ -5,7 +5,9 @@
 #include "config.h"
 #include "hardware/display.h"
 #include "hardware/display_font.h"
+#include "ui/go_saver.h"
 #include "ui/settings_menu.h"
+#include "ui/tron_saver.h"
 #include "ui/watch_face.h"
 
 namespace ui::screensaver {
@@ -179,34 +181,51 @@ void matrixEnd() {
 
 bool s_alternate_watch = false;  // style "Both": flips on every start
 
+// Starts one of the full-screen animations (not the watch face).
+bool animationBegin(int style) {
+  switch (style) {
+    case kStyleGo: return go_saver::begin();
+    case kStyleTron: return tron_saver::begin();
+    default: return matrixBegin();
+  }
+}
+
 }  // namespace
 
 void begin(int style) {
   if (style == kStyleSetting) style = ui::settings::getScreensaverStyle();
   bool watch = false;
   switch (style) {
-    case kStyleMatrix: watch = false; break;
     case kStyleWatch: watch = true; break;
-    default: watch = s_alternate_watch = !s_alternate_watch; break;
+    case kStyleBoth:
+      watch = s_alternate_watch = !s_alternate_watch;
+      style = kStyleMatrix;
+      break;
+    default: break;  // matrix, Go, Tron
   }
   // Fall back to the other one if the first can't get its memory.
   if (watch) {
     if (!watch_face::begin()) matrixBegin();
   } else {
-    if (!matrixBegin()) watch_face::begin();
+    if (!animationBegin(style)) watch_face::begin();
   }
 }
 
 void tick() {
   matrixTick();
+  go_saver::tick();
+  tron_saver::tick();
   watch_face::tick();
 }
 
 void end() {
   matrixEnd();
+  go_saver::end();
+  tron_saver::end();
   watch_face::end();
 }
 
-bool isActive() { return s_active || watch_face::isActive(); }
+bool isActive() { return s_active || go_saver::isActive() || tron_saver::isActive() ||
+         watch_face::isActive(); }
 
 }  // namespace ui::screensaver

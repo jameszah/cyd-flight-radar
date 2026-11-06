@@ -290,8 +290,34 @@ board with the env switcher in the VS Code status bar or `-e`.
   Trails start over when the previous good update is older than `kTrailMaxGapMs` (30 s), so after the
   screensaver or an outage old and new positions aren't joined by a long line. Not yet seen on hardware.
 - Owner's preference: while testing, build only the env being tested (currently `fnk0104s`), not all four.
+- "Go" (`src/ui/go_saver.cpp`, `ui::go_saver`, was `light_cycles`; from a video of the owner's ESP32-CAM-JAMCAM
+  LED matrix "Tron / GO" game): LED-dot grid (pitch min(W,H)/24, min 10: 24x40 on the FNK0115), unlit dots
+  dark grey; cyan and pink cycles with near-white heads and a dim glow ring, one cell per 70 ms. AI: straight
+  unless the flood-fill open area of a turn is clearly bigger, plus a 7% random turn; boxed in = crash (head
+  red), head-on into one cell = both crash. All crashed: 2.5 s pause, wipe 2 rows per step, new round.
+  ~3 bytes per cell malloc'd (freed on exit). Not yet seen on hardware.
+- "Tron" (`src/ui/tron_saver.cpp`, `ui::tron_saver`): no dots, 4 continuous lines in bright pastels
+  (distinct picks from pink / mint / lavender / peach / sky / lemon), 90 degree turns, lines cross freely
+  (no collisions). Step min(W,H)/68 px (min 4: 7 px on the FNK0115) every 20 ms (~350 px/s, a bit faster
+  than Go; catches up to 3 steps if the loop is late). Width min(W,H)*3/160, odd (9 px there; owner asked
+  for 3x the first 3 px). Turns only on a lane grid of 2 steps (14 px) so parallel runs keep a gap.
+  Segments 3-20 lanes, turning towards the side with room near walls. Nose: tip one line width long at 88%
+  white, then a block at 50% white (`behindHead`), both cut short just after a turn; repainted in the trail
+  colour next step. Wipe (top-down bands) at ~40% coverage or 60 s, then new lines. No buffers.
+  Not yet seen on hardware.
+- Saver Style options (pref values, new ones appended): 0 Matrix (rain again), 1 Watch, 2 Both (watch /
+  rain alternate), 3 Go, 4 Tron. `kScreensaverDefaultStyle` = 4 (Tron) for an unsaved pref.
+  The row is now an `lv_dropdown` (`kSaverStyles`, owner asked for a selector) listing Digital Rain / Go /
+  Tron / Watch / Rain + Watch, mapped to those pref values. Seen on hardware: the bottom of the open list
+  was vertical streaks; both dropdown lists (this and Preset) now set `clip_corner` false (the default
+  theme's clip goes through a layer buffer). Fix not yet seen on hardware; if it persists, suspect the
+  40-line draw buffer next.
+- Settings scrolling (owner's video: list lagged the finger on the FNK0115): LVGL draw buffer is 40 lines of
+  internal RAM when `psramFound()` (was 5 lines everywhere; no-PSRAM boards still get 5), `lv_conf.h`
+  refresh / touch read 15 ms under `BOARD_FNK0115` (30 elsewhere), and adsb.fi fetches pause while settings
+  is open on all boards (fetch task shared core 1 with the UI; closing forces a fetch). Not yet seen on hardware.
 - `screensaver.cpp` picks the style: settings row "Saver Style" Matrix / Watch / Both (alternates on each
-  start), pref `"ss_style"`, default `kScreensaverDefaultStyle` = 0 (matrix; owner's choice for the timeout). If one can't allocate, the
+  start) / Go / Tron, pref `"ss_style"`, default `kScreensaverDefaultStyle` = 4 (Tron; was 0 matrix). If one can't allocate, the
   other runs. `create_cycle_row` in `settings_menu.cpp` is the shared title + `< value >` row.
 
 ## Calculator (all boards)
@@ -316,6 +342,18 @@ board with the env switcher in the VS Code status bar or `-e`.
   Op icons are drawn with fills (no AA: the FNK0104S panel has no MISO). EXIT or BOOT closes it.
   While open: adsb.fi fetches and radar redraws stop (`radarCovered()` in `main.cpp`), no screensaver;
   closing forces a fetch. Built for fnk0104s only; not yet seen on hardware.
+
+## Block game (all boards)
+- `src/ui/block_game.cpp`: falling-block puzzle (10x20 well, seven 4-cell pieces from a shuffled bag,
+  ghost piece, simple wall kicks, 450 ms lock delay, level +1 every 10 lines, speed 800 ms x 0.85^level).
+  Opened by tapping the lower-right corner (class legend), which used to start the matrix rain (the rain
+  still runs from the screensaver timeout). Draws straight to `tft`, sized from `tft.width/height`; only
+  changed cells are redrawn (`s_shown`). Buttons: bottom row left / rotate CCW / hard drop (centre) /
+  rotate CW / right (owner's layout; act on touch-down; left/right repeat while held). No soft-drop button
+  (owner's choice). Side panel PAUSE/PLAY and EXIT. Tapping the well's left half rotates CCW, right half CW
+  (or starts / resumes from the overlay). Main routes raw touch to `handleTouch` every loop and calls
+  `tick()`; BOOT closes it; fetches and radar redraws stop while it's open (`radarCovered()`). Game is
+  paused on close and kept. Best score in prefs `"blocks"` / `"best"`. Builds for fnk0115; not yet seen on hardware.
 
 ## Airport weather (all boards)
 - METAR for the "big" airport (the one `runway::drawAirports` returns): `drawStaticGrid` calls
